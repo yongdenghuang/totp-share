@@ -334,7 +334,7 @@ def dashboard():
         "is_duplicate": name_counts[norm_name(r["name"])] > 1,
         "last_seen": last_seen.get(r["id"]),
     } for r in rows]
-    return render_template("dashboard.html", accounts=accounts,
+    return render_template("dashboard.html", accounts=accounts, groups=list_groups(),
                            base_url=request.host_url.rstrip("/"),
                            share_pw_enabled=get_setting("share_password_enabled") == "1")
 
@@ -352,10 +352,52 @@ def admin_codes():
             codes[str(r["id"])] = None
     return jsonify(codes=codes, remaining=TOTP_STEP - (now % TOTP_STEP), period=TOTP_STEP)
 
-# ---------- 账号表单 ----------
+# ---------- 分组 ----------
+NEW_GROUP_OPTION = "__new__"   # 账号表单下拉里「＋ 新建分组…」这一项的取值
+
 def parse_group_name(raw):
     s = re.sub(r"\s+", " ", raw or "").strip()[:30]
     return s or None
+
+def list_groups():
+    return [r["name"] for r in query_all("SELECT name FROM account_groups ORDER BY id")]
+
+def find_group(name):
+    """按名称找已有分组（忽略大小写和多余空白），返回库里的规范写法或 None。"""
+    key = norm_name(name)
+    return next((g for g in list_groups() if norm_name(g) == key), None)
+
+def create_group(raw):
+    """新建分组并返回名称；同名分组已存在时直接返回已有的那个。"""
+    name = parse_group_name(raw)
+    if not name:
+        raise ValueError("请填写分组名称")
+    if name == NEW_GROUP_OPTION:
+        raise ValueError("这个名称不能用作分组名")
+    existing = find_group(name)
+    if existing:
+        return existing
+    execute("INSERT INTO account_groups(name) VALUES (?)", (name,))
+    return name
+
+def resolve_group(raw):
+    """把提交上来的分组名对应到已有分组。留空 = 未分组（返回 None）。"""
+    name = parse_group_name(raw)
+    if not name:
+        return None
+    existing = find_group(name)
+    if not existing:
+        raise ValueError(f"分组「{name}」不存在，请先新建")
+    return existing
+
+def group_from_form(form):
+    """账号表单：下拉选了已有分组，或选「新建分组」并填了新名字。"""
+    choice = form.get("group_name", "")
+    if choice == NEW_GROUP_OPTION:
+        return create_group(form.get("new_group", ""))
+    return resolve_group(choice)
+
+# ---------- 账号表单 ----------
 
 def parse_link_password(raw):
     """分享链接的单独密码。留空返回 None（表示不修改）。"""
@@ -369,9 +411,10 @@ def parse_link_password(raw):
 
 def _form_context(exclude_id=None):
     """账号表单需要的辅助数据：已有分组（下拉提示）、已有名称（输入时即时提示重名）。"""
-    rows = query_all("SELECT id, name, group_name FROM accounts ORDER BY id")
+    rows = query_all("SELECT id, name FROM accounts ORDER BY id")
     return {
-        "group_options": sorted({r["group_name"] for r in rows if r["group_name"]}),
+        "group_options": list_groups(),
+        "new_group_option": NEW_GROUP_OPTION,
         "existing_names": [r["name"] for r in rows if r["id"] != exclude_id],
         "share_pw_enabled": get_setting("share_password_enabled") == "1",
     }
@@ -381,11 +424,13 @@ def _form_context(exclude_id=None):
 def account_new():
     error = None
     dup_warning = None
-    form_data = {"name": "", "secret": "", "group_name": "", "link_password": ""}
+    form_data = {"name": "", "secret": "", "group_name": "", "new_group": "",
+                 "link_password": ""}
     if request.method == "POST":
         form_data["name"] = request.form.get("name", "").strip()[:100]
         form_data["secret"] = request.form.get("secret", "").strip()
         form_data["group_name"] = request.form.get("group_name", "").strip()
+        form_data["new_group"] = request.form.get("new_group", "").strip()
         form_data["link_password"] = request.form.get("link_password", "")
         if not form_data["name"]:
             error = "请填写账号名称"
@@ -394,18 +439,20 @@ def account_new():
                 secret_norm = validate_base32(form_data["secret"])
                 pyotp.TOTP(secret_norm).now()
                 link_pw_hash = parse_link_password(form_data["link_password"])
+                if form_data["group_name"] != NEW_GROUP_OPTION:
+                    resolve_group(form_data["group_name"])   # 先校验，别等到确认重名之后才报错
                 dups = find_same_name(form_data["name"])
                 if dups and request.form.get("confirm_duplicate") != "1":
                     dup_warning = duplicate_warning(dups)
                 else:
+                    group = group_from_form(request.form)
                     token = new_token()
                     execute("""INSERT INTO accounts(
                                  name, secret_encrypted, url_token, url_token_hash,
                                  group_name, share_password_hash)
                                VALUES (?,?,?,?, ?,?)""",
                             (form_data["name"], encrypt_secret(secret_norm),
-                             token, hash_token(token),
-                             parse_group_name(form_data["group_name"]), link_pw_hash))
+                             token, hash_token(token), group, link_pw_hash))
                     flash("账号已添加。分享链接：" + request.host_url + "t/" + token, "success")
                     return redirect(url_for("dashboard"))
             except ValueError as e:
@@ -422,11 +469,13 @@ def account_edit(aid):
     error = None
     dup_warning = None
     account = {"name": row["name"], "secret": "", "group_name": row["group_name"] or "",
+               "new_group": "",
                "link_password": "", "has_own_password": bool(row["share_password_hash"])}
     if request.method == "POST":
         account["name"] = request.form.get("name", "").strip()[:100]
         account["secret"] = request.form.get("secret", "").strip()
         account["group_name"] = request.form.get("group_name", "").strip()
+        account["new_group"] = request.form.get("new_group", "").strip()
         account["link_password"] = request.form.get("link_password", "")
         regen = request.form.get("regen_url") == "1"
         clear_pw = request.form.get("clear_link_password") == "1"
@@ -437,8 +486,10 @@ def account_edit(aid):
         else:
             try:
                 link_pw_hash = parse_link_password(account["link_password"])
-                sql_parts = ["name=?", "group_name=?"]
-                args = [account["name"], parse_group_name(account["group_name"])]
+                if account["group_name"] != NEW_GROUP_OPTION:
+                    resolve_group(account["group_name"])
+                sql_parts = ["name=?"]
+                args = [account["name"]]
                 if account["secret"]:
                     s = validate_base32(account["secret"])
                     pyotp.TOTP(s).now()
@@ -450,6 +501,8 @@ def account_edit(aid):
                 if dups and request.form.get("confirm_duplicate") != "1":
                     dup_warning = duplicate_warning(dups)
                 else:
+                    sql_parts.append("group_name=?")
+                    args.append(group_from_form(request.form))
                     if regen:
                         t = new_token()
                         sql_parts.append("url_token=?"); args.append(t)
@@ -520,9 +573,57 @@ def account_field_update(aid):
     if not query_one("SELECT 1 FROM accounts WHERE id=?", (aid,)):
         return jsonify(ok=False, error="账号不存在"), 404
     raw = data.get("value")
-    group = parse_group_name(str(raw) if raw is not None else "")
+    try:
+        group = resolve_group(str(raw) if raw is not None else "")
+    except ValueError as e:
+        return jsonify(ok=False, error=str(e)), 400
     execute("UPDATE accounts SET group_name=? WHERE id=?", (group, aid))
     return jsonify(ok=True, display=group or "-", raw_value=group or "")
+
+# ---------- 分组管理 ----------
+@app.route("/admin/groups", methods=["GET", "POST"])
+@login_required
+def groups_page():
+    error = None; msg = None
+    if request.method == "POST":
+        action = request.form.get("action")
+        try:
+            if action == "add":
+                raw = request.form.get("name", "")
+                if parse_group_name(raw) and find_group(raw):
+                    raise ValueError(f"分组「{find_group(raw)}」已存在")
+                msg = f"已新建分组「{create_group(raw)}」"
+            elif action == "rename":
+                old = find_group(request.form.get("old_name", ""))
+                new = parse_group_name(request.form.get("name", ""))
+                if not old:
+                    raise ValueError("分组不存在")
+                if not new or new == NEW_GROUP_OPTION:
+                    raise ValueError("请填写新的分组名称")
+                clash = find_group(new)
+                if clash and clash != old:
+                    raise ValueError(f"分组「{clash}」已存在")
+                db = get_db()   # 分组表和账号上的分组名一起改，要么都成要么都不成
+                db.execute("UPDATE account_groups SET name=? WHERE name=?", (new, old))
+                db.execute("UPDATE accounts SET group_name=? WHERE group_name=?", (new, old))
+                db.commit()
+                msg = f"已把「{old}」改名为「{new}」"
+            elif action == "delete":
+                old = find_group(request.form.get("old_name", ""))
+                if not old:
+                    raise ValueError("分组不存在")
+                db = get_db()
+                db.execute("UPDATE accounts SET group_name=NULL WHERE group_name=?", (old,))
+                db.execute("DELETE FROM account_groups WHERE name=?", (old,))
+                db.commit()
+                msg = f"已删除分组「{old}」，组内账号变为未分组"
+        except ValueError as e:
+            error = str(e)
+    counts = {r["group_name"]: r["n"] for r in query_all(
+        "SELECT group_name, COUNT(*) AS n FROM accounts "
+        "WHERE group_name IS NOT NULL GROUP BY group_name")}
+    return render_template("groups.html", error=error, msg=msg,
+                           groups=[{"name": g, "count": counts.get(g, 0)} for g in list_groups()])
 
 # ---------- 设置 ----------
 @app.route("/admin/settings", methods=["GET", "POST"])

@@ -20,10 +20,16 @@
 
     <div class="mb-3">
       <label class="form-label" for="group_name">分组</label>
-      <input class="form-control" id="group_name" name="group_name" list="groupOptions" maxlength="30"
-             value="{{ account.group_name or '' }}" placeholder="例如：plus、pro20x、plus代充">
-      <datalist id="groupOptions">{% for g in group_options %}<option value="{{ g }}">{% endfor %}</datalist>
-      <div class="form-text">可选。输入新名字即新建分组，列表页可按分组筛选。</div>
+      <select class="form-select" id="group_name" name="group_name">
+        <option value="">未分组</option>
+        {% for g in group_options %}
+        <option value="{{ g }}" {% if account.group_name == g %}selected{% endif %}>{{ g }}</option>
+        {% endfor %}
+        <option value="{{ new_group_option }}" {% if account.group_name == new_group_option %}selected{% endif %}>＋ 新建分组…</option>
+      </select>
+      <input class="form-control mt-2 d-none" id="new_group" name="new_group" maxlength="30"
+             value="{{ account.new_group or '' }}" placeholder="新分组的名称，例如：plus代充" aria-label="新分组的名称">
+      <div class="form-text">可选。已有分组可在 <a href="{{ url_for('groups_page') }}">分组管理</a> 里改名或删除。</div>
     </div>
 
     <div class="mb-0">
@@ -87,6 +93,19 @@
   var confirmEl = document.getElementById('confirmDuplicate');
   var original = norm(nameEl.defaultValue);
   var isEdit = {{ 'true' if mode == 'edit' else 'false' }};
+
+  // 选了「＋ 新建分组…」才显示新分组名称输入框
+  var groupSel = document.getElementById('group_name');
+  var newGroup = document.getElementById('new_group');
+  function syncGroup(focus){
+    var creating = groupSel.value === {{ new_group_option|tojson }};
+    newGroup.classList.toggle('d-none', !creating);
+    newGroup.required = creating;
+    if (creating && focus) newGroup.focus();
+  }
+  groupSel.addEventListener('change', function(){ syncGroup(true); });
+  syncGroup(false);
+
   function norm(s){ return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
   function check(){
     var v = norm(nameEl.value);

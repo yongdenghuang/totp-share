@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}分组管理{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-lg-8">
+{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+{% if msg %}<div class="alert alert-success">{{ msg }}</div>{% endif %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">分组管理</h4>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('dashboard') }}">← 返回账号列表</a>
+</div>
+
+<div class="card p-4 mb-3">
+  <h6 class="mb-3">新建分组</h6>
+  <form method="post" class="d-flex gap-2">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <input class="form-control" name="name" maxlength="30" required autofocus
+           placeholder="例如：plus、pro20x、plus代充">
+    <button class="btn btn-primary text-nowrap">新建</button>
+  </form>
+  <div class="form-text">建好后，在添加或编辑账号时就能从下拉框里选它；账号列表里也可以直接点「分组」单元格改。</div>
+</div>
+
+<div class="card">
+ <div class="table-responsive"><table class="table mb-0 align-middle">
+  <thead class="table-light">
+    <tr><th>分组名称</th><th style="width:110px">账号数</th><th style="width:90px"></th></tr>
+  </thead>
+  <tbody>
+  {% for g in groups %}
+    <tr>
+      <td>
+        <form method="post" class="d-flex gap-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="rename">
+          <input type="hidden" name="old_name" value="{{ g.name }}">
+          <input class="form-control form-control-sm" name="name" value="{{ g.name }}" maxlength="30" required
+                 aria-label="分组名称">
+          <button class="btn btn-sm btn-outline-secondary text-nowrap">改名</button>
+        </form>
+      </td>
+      <td>{{ g.count }} 个</td>
+      <td class="text-end">
+        <form method="post" class="d-inline" onsubmit="return confirm(this.dataset.confirm)"
+              data-confirm="删除分组「{{ g.name }}」？组内的 {{ g.count }} 个账号不会被删除，只是变为未分组。">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="delete">
+          <input type="hidden" name="old_name" value="{{ g.name }}">
+          <button class="btn btn-sm btn-outline-danger">删除</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="3" class="text-center text-muted py-5">还没有分组，在上面新建一个。</td></tr>
+  {% endfor %}
+  </tbody>
+ </table></div>
+</div>
+</div></div>
+{% endblock %}

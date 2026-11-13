@@ -25,10 +25,9 @@
   </div>
 </div>
 <div class="small text-muted mb-3">
-  点验证码复制 · 点分组单元格直接改 · 拖 <span class="drag-handle-inline">⋮⋮</span> 排序 · 点表头按列排序
+  点验证码复制 · 点分组单元格直接换组 · 拖 <span class="drag-handle-inline">⋮⋮</span> 排序 · 点表头按列排序
   <span id="saveStatus" class="ms-2"></span>
 </div>
-<datalist id="groupOptions"></datalist>
 
 <div class="card">
  <div class="table-responsive"><table class="table table-hover mb-0 align-middle table-sortable" id="accountsTable">
@@ -145,7 +144,7 @@
   }
   td.editable.editing { padding: 2px 4px !important; background: #fff3cd; }
   td.editable.editing::after { display: none; }
-  td.editable input.inline-input {
+  td.editable .inline-input {
     width: 100%; min-width: 6em; padding: 4px 6px; border: 1px solid #0d6efd;
     border-radius: 3px; font-size: 0.95em; outline: none;
     box-shadow: 0 0 0 2px rgba(13,110,253,.15);
@@ -390,7 +389,8 @@
   var chipsEl = document.getElementById('groupChips');
   var countEl = document.getElementById('filterCount');
   var noMatchEl = document.getElementById('noMatch');
-  var groupOptions = document.getElementById('groupOptions');
+  var allGroups = {{ groups|tojson }};   // 分组表里的全部分组，包括还没有账号的
+  var groupsUrl = '{{ url_for("groups_page") }}';
   var UNGROUPED = '\u0000ungrouped';
   var activeGroup = null;   // null = 全部
 
@@ -417,14 +417,17 @@
       var g = row.dataset.group || '';
       if (g) counts[g] = (counts[g] || 0) + 1; else ungrouped++;
     });
-    var names = Object.keys(counts).sort(function(a, b){ return a.localeCompare(b, 'zh-Hans-CN'); });
-    // 当前选中的分组已经没有账号了 → 回到"全部"
-    if (activeGroup !== null && activeGroup !== UNGROUPED && !counts[activeGroup]) activeGroup = null;
     if (activeGroup === UNGROUPED && !ungrouped) activeGroup = null;
 
     chipsEl.textContent = '';
-    groupOptions.textContent = '';
-    if (!names.length) return;   // 还没分过组就不显示筛选条
+    var manage = document.createElement('a');
+    manage.href = groupsUrl;
+    manage.className = 'btn btn-sm btn-link text-decoration-none px-1';
+    if (!allGroups.length) {     // 还没建过分组：只给一个入口
+      manage.textContent = '＋ 新建分组';
+      chipsEl.appendChild(manage);
+      return;
+    }
     function chip(label, value, n){
       var b = document.createElement('button');
       b.type = 'button';
@@ -434,11 +437,10 @@
       chipsEl.appendChild(b);
     }
     chip('全部', null, rows.length);
-    names.forEach(function(g){
-      chip(g, g, counts[g]);
-      var opt = document.createElement('option'); opt.value = g; groupOptions.appendChild(opt);
-    });
+    allGroups.forEach(function(g){ chip(g, g, counts[g] || 0); });
     if (ungrouped) chip('未分组', UNGROUPED, ungrouped);
+    manage.textContent = '管理分组';
+    chipsEl.appendChild(manage);
   }
 
   searchBox.addEventListener('input', applyFilter);
@@ -560,17 +562,24 @@
 
   function startEdit(td){
     if (editing) return;
+    if (!allGroups.length) {
+      showStatus('还没有分组，请先点「＋ 新建分组」', 'error');
+      return;
+    }
     var oldVal = td.dataset.raw || '';
-    var input = document.createElement('input');
-    input.type = 'text'; input.maxLength = 30; input.value = oldVal;
+    var input = document.createElement('select');
     input.className = 'inline-input';
-    input.setAttribute('list', 'groupOptions');
-    input.placeholder = '分组名，留空 = 未分组';
+    [''].concat(allGroups).forEach(function(g){
+      var opt = document.createElement('option');
+      opt.value = g; opt.textContent = g || '未分组';
+      input.appendChild(opt);
+    });
+    input.value = oldVal;
     td.textContent = '';
     td.appendChild(input);
     td.classList.add('editing');
     editing = td;
-    input.focus(); input.select();
+    input.focus();
 
     var finished = false;
     function finish(value){
@@ -581,7 +590,7 @@
     function commit(){
       if (finished) return;
       finished = true;
-      var newVal = input.value.trim();
+      var newVal = input.value;
       if (newVal === oldVal) { finish(oldVal); return; }
       td.classList.remove('editing');
       td.classList.add('saving');
@@ -605,6 +614,7 @@
       if (e.key === 'Enter') { e.preventDefault(); commit(); }
       else if (e.key === 'Escape') { e.preventDefault(); finished = true; finish(oldVal); }
     });
+    input.addEventListener('change', commit);   // 选完即保存
     input.addEventListener('blur', commit);
     input.addEventListener('click', function(e){ e.stopPropagation(); });
   }

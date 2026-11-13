@@ -18,6 +18,14 @@ ACCOUNT_COLUMNS = [
     ("share_password_hash", "TEXT"),   # 此链接的单独密码；NULL = 跟随统一设置
 ]
 
+GROUPS_SQL = """
+CREATE TABLE IF NOT EXISTS account_groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 ACCESS_LOGS_SQL = """
 CREATE TABLE IF NOT EXISTS access_logs (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +63,14 @@ def ensure_schema(db):
     if "access_logs" not in tables:
         changes.append("access_logs")
     db.executescript(ACCESS_LOGS_SQL)
+
+    if "account_groups" not in tables:
+        changes.append("account_groups")
+    db.executescript(GROUPS_SQL)
+    # 账号上已经写了、但分组表里还没有的分组名，补登记进去
+    db.execute("""INSERT OR IGNORE INTO account_groups(name)
+                  SELECT DISTINCT group_name FROM accounts
+                  WHERE group_name IS NOT NULL AND group_name <> ''""")
 
     db.commit()
     return changes

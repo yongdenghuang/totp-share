@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily TOTP-Share encrypted backup
+
+[Timer]
+# 每天 20:10 UTC（北京时间凌晨 04:10）
+OnCalendar=*-*-* 20:10:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

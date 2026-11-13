@@ -20,7 +20,7 @@ def post(c, path, **kw):
 def test_migration_adds_columns_and_keeps_old_data(ctx):
     cols = {r["name"] for r in ctx.sql("PRAGMA table_info(accounts)")}
     assert {"group_name", "share_password_hash", "sort_order"} <= cols
-    assert ctx.sql("SELECT name FROM sqlite_master WHERE name='access_logs'")
+    assert len(ctx.sql("SELECT name FROM sqlite_master WHERE name IN ('access_logs','account_groups')")) == 2
     # 旧的合租记账数据原样保留，方便回滚
     row = ctx.sql("SELECT share_count, renewal_amount, recharge_channel FROM accounts")[0]
     assert (row["share_count"], row["renewal_amount"], row["recharge_channel"]) == (3, "148", "支付宝")
@@ -114,7 +114,7 @@ def test_duplicate_name_needs_confirmation(ctx):
 def test_edit_only_warns_when_renaming_into_a_duplicate(ctx):
     c = ctx.admin()
     rows = {r["name"]: r["id"] for r in ctx.sql("SELECT id, name FROM accounts")}
-    r = post(c, f"/admin/accounts/{rows['plus-01']}/edit", data={"name": "plus-01", "group_name": "plus"})
+    r = post(c, f"/admin/accounts/{rows['plus-01']}/edit", data={"name": "plus-01"})
     assert r.status_code == 302
     r = post(c, f"/admin/accounts/{rows['plus-01']}/edit", data={"name": "pro20x-01"})
     assert r.status_code == 200 and "已存在同名账号" in r.get_data(as_text=True)
@@ -122,15 +122,75 @@ def test_edit_only_warns_when_renaming_into_a_duplicate(ctx):
 
 
 # ---------- 分组 ----------
+def add_group(c, name):
+    return post(c, "/admin/groups", data={"action": "add", "name": name})
+
+
+def test_group_management(ctx):
+    c = ctx.admin()
+    assert "已新建分组「plus」" in add_group(c, " plus ").get_data(as_text=True)
+    assert "已存在" in add_group(c, "PLUS").get_data(as_text=True)       # 忽略大小写查重
+    add_group(c, "pro20x")
+    assert [r["name"] for r in ctx.sql("SELECT name FROM account_groups ORDER BY id")] == ["plus", "pro20x"]
+
+    post(c, "/admin/accounts/1/field", json={"field": "group_name", "value": "plus"})
+    # 改名：分组表和账号上的分组名一起变
+    r = post(c, "/admin/groups", data={"action": "rename", "old_name": "plus", "name": "plus代充"})
+    assert "改名为「plus代充」" in r.get_data(as_text=True)
+    assert ctx.sql("SELECT group_name FROM accounts WHERE id=1")[0]["group_name"] == "plus代充"
+    assert "已存在" in post(c, "/admin/groups", data={"action": "rename", "old_name": "plus代充",
+                                                   "name": "pro20x"}).get_data(as_text=True)
+    # 删除：账号保留，变为未分组
+    post(c, "/admin/groups", data={"action": "delete", "old_name": "plus代充"})
+    assert ctx.sql("SELECT group_name FROM accounts WHERE id=1")[0]["group_name"] is None
+    assert len(ctx.sql("SELECT id FROM accounts")) == 2
+    assert [r["name"] for r in ctx.sql("SELECT name FROM account_groups")] == ["pro20x"]
+
+
 def test_group_inline_edit_and_field_whitelist(ctx):
     c = ctx.admin()
-    r = post(c, "/admin/accounts/1/field", json={"field": "group_name", "value": "  plus  代充 "})
-    assert r.get_json() == {"ok": True, "display": "plus 代充", "raw_value": "plus 代充"}
+    add_group(c, "plus")
+    r = post(c, "/admin/accounts/1/field", json={"field": "group_name", "value": " PLUS "})
+    assert r.get_json() == {"ok": True, "display": "plus", "raw_value": "plus"}
+    r = post(c, "/admin/accounts/1/field", json={"field": "group_name", "value": "没建过的组"})
+    assert r.status_code == 400 and "不存在" in r.get_json()["error"]
     r = post(c, "/admin/accounts/1/field", json={"field": "group_name", "value": ""})
     assert r.get_json()["raw_value"] == ""
     assert ctx.sql("SELECT group_name FROM accounts WHERE id=1")[0]["group_name"] is None
     for field in ("renewal_amount", "secret_encrypted", "url_token", "name"):
         assert post(c, "/admin/accounts/1/field", json={"field": field, "value": "x"}).status_code == 400
+
+
+def test_account_form_selects_or_creates_group(ctx):
+    c = ctx.admin()
+    add_group(c, "plus")
+    html = get(c, "/admin/accounts/new").get_data(as_text=True)
+    assert '<option value="plus"' in html and "新建分组" in html
+    # 选已有分组
+    post(c, "/admin/accounts/new", data={"name": "a1", "secret": pyotp.random_base32(), "group_name": "plus"})
+    # 表单里顺手新建分组
+    post(c, "/admin/accounts/new", data={"name": "a2", "secret": pyotp.random_base32(),
+                                         "group_name": "__new__", "new_group": "team"})
+    # 提交一个不存在的分组名 → 拒绝，不创建账号
+    r = post(c, "/admin/accounts/new", data={"name": "a3", "secret": pyotp.random_base32(), "group_name": "ghost"})
+    assert r.status_code == 200 and "不存在" in r.get_data(as_text=True)
+    got = {r["name"]: r["group_name"] for r in ctx.sql("SELECT name, group_name FROM accounts")}
+    assert got["a1"] == "plus" and got["a2"] == "team" and "a3" not in got
+    assert {r["name"] for r in ctx.sql("SELECT name FROM account_groups")} == {"plus", "team"}
+    # 编辑时改到另一个分组
+    aid = ctx.sql("SELECT id FROM accounts WHERE name='a1'")[0]["id"]
+    post(c, f"/admin/accounts/{aid}/edit", data={"name": "a1", "group_name": "team"})
+    assert ctx.sql("SELECT group_name FROM accounts WHERE id=?", (aid,))[0]["group_name"] == "team"
+
+
+def test_migration_registers_groups_already_on_accounts(ctx):
+    import sqlite3
+    from migrate import ensure_schema
+    ctx.sql("UPDATE accounts SET group_name='legacy' WHERE id=1")
+    db = sqlite3.connect(ctx.path)
+    ensure_schema(db)
+    db.close()
+    assert [r["name"] for r in ctx.sql("SELECT name FROM account_groups")] == ["legacy"]
 
 
 # ---------- 每条链接单独密码 ----------
@@ -251,7 +311,8 @@ def test_wrong_password_is_logged_and_logs_page_renders(ctx):
 def test_new_account_with_group_and_password(ctx):
     c = ctx.admin()
     r = post(c, "/admin/accounts/new", data={"name": "plus代充-01", "secret": pyotp.random_base32(),
-                                             "group_name": "plus代充", "link_password": "secret-9"})
+                                             "group_name": "__new__", "new_group": "plus代充",
+                                             "link_password": "secret-9"})
     assert r.status_code == 302
     row = ctx.sql("SELECT group_name, share_password_hash, url_token FROM accounts WHERE name='plus代充-01'")[0]
     assert row["group_name"] == "plus代充" and row["share_password_hash"].startswith("$argon2")

@@ -1,0 +1,11 @@
+[Unit]
+Description=TOTP-Share encrypted backup
+
+[Service]
+Type=oneshot
+# 备份脚本装在 root 专属的位置，而不是应用用户可写的 /opt/totp-share 下
+ExecStart=/usr/bin/python3 /usr/local/sbin/totp-share-backup
+EnvironmentFile=/etc/totp-share/env
+Nice=10
+PrivateTmp=true
+NoNewPrivileges=true
