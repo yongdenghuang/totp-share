@@ -122,3 +122,7 @@ python3 -m venv .venv
 | `templates/` | 页面模板 |
 | `deploy/` | systemd 单元和环境文件示例 |
 | `tests/` | 自动化测试 |
+
+## 许可证
+
+[MIT](LICENSE)
