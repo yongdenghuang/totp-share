@@ -25,6 +25,7 @@
  <div class="container">
   <a class="navbar-brand" href="{{ url_for('dashboard') }}">🔐 TOTP 分享管理</a>
   <div class="d-flex align-items-center">
+   <a class="btn btn-sm btn-light me-2" href="{{ url_for('access_logs') }}">访问记录</a>
    <a class="btn btn-sm btn-light me-2" href="{{ url_for('settings') }}">设置</a>
    <form method="post" action="{{ url_for('logout') }}" class="d-inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

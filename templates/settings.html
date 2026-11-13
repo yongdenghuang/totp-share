@@ -6,14 +6,15 @@
 {% if msg %}<div class="alert alert-success">{{ msg }}</div>{% endif %}
 
 <div class="card p-4 mb-3">
- <h5 class="mb-3">分享页面密码保护</h5>
+ <h5 class="mb-1">分享页面统一密码</h5>
+ <p class="text-muted small mb-3">对没有单独设密码的分享链接生效。某条链接的单独密码在「编辑账号」里设置，设了之后那条链接只认自己的密码。</p>
  <form method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="action" value="toggle">
   <div class="form-check form-switch mb-3">
    <input class="form-check-input" type="checkbox" role="switch" id="enable"
           name="share_password_enabled" {% if share_pw_enabled %}checked{% endif %}>
-   <label class="form-check-label" for="enable">开启（所有分享链接需输入密码才能查看 TOTP 码）</label>
+   <label class="form-check-label" for="enable">开启（没有单独密码的分享链接需输入此密码才能查看 TOTP 码）</label>
   </div>
   <div class="mb-3"><label class="form-label">密码（留空表示不修改现有密码）</label>
    <input class="form-control" type="password" name="share_password" minlength="4"></div>

@@ -9,80 +9,26 @@
  </div>
 </div>
 
-{# ===== 续费提醒横幅 ===== #}
-{% if expired or due_soon %}
-<div class="alert alert-danger border-danger mb-3">
-  <div class="d-flex align-items-start">
-    <div class="me-2" style="font-size:1.5em; line-height:1">🔔</div>
-    <div class="flex-grow-1">
-      <strong>续费提醒</strong>
-      {% if expired %}
-      <div class="mt-2">
-        <span class="badge bg-danger me-1">已过期 {{ expired|length }} 个</span>
-        {% for a in expired %}
-          <span class="badge bg-light text-danger border border-danger me-1 mb-1">
-            {{ a.name }} <small>(逾期 {{ -a._days_left }} 天)</small>
-          </span>
-        {% endfor %}
-      </div>
-      {% endif %}
-      {% if due_soon %}
-      <div class="mt-2">
-        <span class="badge bg-warning text-dark me-1">7 天内到期 {{ due_soon|length }} 个</span>
-        {% for a in due_soon %}
-          <span class="badge bg-light text-warning-emphasis border border-warning me-1 mb-1">
-            {{ a.name }} <small>(还剩 {{ a._days_left }} 天)</small>
-          </span>
-        {% endfor %}
-      </div>
-      {% endif %}
-    </div>
-  </div>
-</div>
-{% endif %}
-
-{# ===== 蓝色统计卡片 ===== #}
-<div class="card stats-card border-0 text-white mb-3" style="background:linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%)">
-  <div class="card-body py-3">
-    <div class="row g-3 text-center">
-      <div class="col-6 col-md">
-        <div class="stat-label">账号总数</div>
-        <div class="stat-value">{{ stats.account_count }}<small class="ms-1">个</small></div>
-      </div>
-      <div class="col-6 col-md">
-        <div class="stat-label">合租总人数</div>
-        <div class="stat-value">{{ stats.total_share }}<small class="ms-1">人</small></div>
-      </div>
-      <div class="col-6 col-md">
-        <div class="stat-label">合计租金收入 <small class="opacity-75">(¥{{ stats.price_per_person }}/人)</small></div>
-        <div class="stat-value">¥{{ stats.total_rent }}</div>
-      </div>
-      <div class="col-6 col-md">
-        <div class="stat-label">合计续费成本</div>
-        <div class="stat-value">¥{{ stats.total_cost }}</div>
-      </div>
-      <div class="col-12 col-md">
-        <div class="stat-label">预估毛利</div>
-        <div class="stat-value {% if stats.profit < 0 %}text-warning{% endif %}">
-          ¥{{ stats.profit }}
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
 {% if share_pw_enabled %}
-<div class="alert alert-info py-2">🔒 分享页面密码保护已开启</div>
+<div class="alert alert-info py-2">🔒 统一分享密码已开启（设了单独密码的链接用各自的密码）</div>
 {% endif %}
 
-<div class="alert alert-light border small py-2 mb-3">
-  💡 <strong>使用提示</strong>：
-  拖动左侧 <span class="drag-handle-inline">⋮⋮</span> 排序 /
-  点击表头按列排序 /
-  <strong>点击单元格直接编辑</strong>
-  （续费日期输入 <code>月-日</code>，如 <code>05-20</code>）
+{# ===== 搜索 + 分组筛选 + 验证码倒计时 ===== #}
+<div class="d-flex flex-wrap align-items-center gap-2 mb-2" id="filterBar">
+  <input type="search" class="form-control form-control-sm" id="searchBox"
+         placeholder="搜索名称 / 分组" autocomplete="off" style="max-width:240px">
+  <div class="d-flex flex-wrap gap-1" id="groupChips"></div>
+  <span class="text-muted small" id="filterCount"></span>
+  <div class="ms-auto d-flex align-items-center gap-2" id="codeTimer" title="验证码每 30 秒更新一次">
+    <div class="progress" style="width:90px;height:6px"><div class="progress-bar" id="timerBar" style="width:100%"></div></div>
+    <span class="small text-muted" id="timerText" style="min-width:2.4em">--</span>
+  </div>
+</div>
+<div class="small text-muted mb-3">
+  点验证码复制 · 点分组单元格直接改 · 拖 <span class="drag-handle-inline">⋮⋮</span> 排序 · 点表头按列排序
   <span id="saveStatus" class="ms-2"></span>
 </div>
+<datalist id="groupOptions"></datalist>
 
 <div class="card">
  <div class="table-responsive"><table class="table table-hover mb-0 align-middle table-sortable" id="accountsTable">
@@ -90,85 +36,61 @@
     <tr>
       <th data-sort-type="none" style="width:36px" title="拖拽排序"></th>
       <th data-sort-type="string">名称</th>
+      <th data-sort-type="string" class="editable-col">分组</th>
+      <th data-sort-type="none">验证码</th>
       <th data-sort-type="none">分享链接</th>
-      <th data-sort-type="number" class="editable-col">合租人数</th>
-      <th data-sort-type="date"   class="editable-col">续费日期</th>
-      <th data-sort-type="number" class="editable-col">续费金额</th>
-      <th data-sort-type="string" class="editable-col">充值渠道</th>
-      <th data-sort-type="date">创建时间</th>
-      <th data-sort-type="none" style="min-width:220px">操作</th>
+      <th data-sort-type="string">最近访问</th>
+      <th data-sort-type="none">操作</th>
     </tr>
   </thead>
   <tbody id="accountsBody">
   {% for a in accounts %}
-   <tr data-id="{{ a.id }}" data-created="{{ a.created_at }}">
+   <tr data-id="{{ a.id }}" data-name="{{ a.name }}" data-group="{{ a.group_name }}"
+       data-url="{{ base_url }}/t/{{ a.url_token }}">
     <td class="drag-handle text-center" data-label="" title="按住拖动">⋮⋮</td>
-    <td data-label="名称"><strong>{{ a.name }}</strong></td>
+    <td data-label="名称" title="创建于 {{ a.created_at }}"><strong>{{ a.name }}</strong>
+      {% if a.is_duplicate %}<span class="badge bg-warning text-dark ms-1" title="有其他账号用了同样的名称">重名</span>{% endif %}
+    </td>
+
+    <td class="editable" data-label="分组" data-field="group_name"
+        data-raw="{{ a.group_name }}" data-sort-value="{{ a.group_name }}">
+      {% if a.group_name %}{{ a.group_name }}{% else %}<span class="text-muted">-</span>{% endif %}
+    </td>
+
+    <td data-label="验证码">
+      <button type="button" class="code-btn" data-code="" title="点击复制" disabled>··· ···</button>
+    </td>
+
     <td data-label="链接">
-     <div class="d-flex align-items-center">
-      <code class="token-badge me-2">{{ base_url }}/t/{{ a.url_token }}</code>
-      <button class="btn btn-sm btn-outline-secondary" onclick="copyText(this,'{{ base_url }}/t/{{ a.url_token }}')">复制</button>
+     <div class="d-flex align-items-center flex-nowrap gap-1">
+      <code class="token-badge me-1 js-link-text d-none d-xl-inline text-nowrap" title="{{ base_url }}/t/{{ a.url_token }}">/t/{{ a.url_token }}</code>
+      {% if a.has_own_password %}<span title="此链接设有单独密码">🔒</span>{% endif %}
+      <button type="button" class="btn btn-sm btn-outline-secondary js-copy-link">复制</button>
+      <button type="button" class="btn btn-sm btn-outline-warning js-regen" title="生成新链接，旧链接立即失效">换链接</button>
      </div>
     </td>
 
-    <td class="editable"
-        data-label="人数" data-field="share_count"
-        data-type="number"
-        data-raw="{{ a.share_count if a.share_count else '' }}"
-        data-sort-value="{{ a.share_count if a.share_count else '' }}">
-      {% if a.share_count %}{{ a.share_count }} 人{% else %}<span class="text-muted">-</span>{% endif %}
+    <td class="text-muted small text-nowrap" data-label="访问" data-sort-value="{{ a.last_seen or '' }}">
+      {% if a.last_seen %}<span title="北京时间">{{ a.last_seen|cn_time }}</span>{% else %}-{% endif %}
     </td>
 
-    <td class="editable{% if a._days_left is defined and a._days_left < 0 %} date-expired{% elif a._days_left is defined and a._days_left <= 7 %} date-due-soon{% endif %}"
-        data-label="日期" data-field="renewal_date"
-        data-type="date-mmdd"
-        data-raw="{{ a.renewal_date or '' }}"
-        data-sort-value="{{ a.renewal_date or '' }}">
-      {% if a.renewal_date %}{{ a.renewal_date[5:] }}{% else %}-{% endif %}
-    </td>
-
-    <td class="editable"
-        data-label="金额" data-field="renewal_amount"
-        data-type="number-decimal"
-        data-raw="{{ a.renewal_amount or '' }}"
-        data-sort-value="{{ a.renewal_amount or '' }}">
-      {% if a.renewal_amount %}
-        ¥{{ a.renewal_amount|float|int }}
-      {% else %}<span class="text-muted">-</span>{% endif %}
-    </td>
-
-    <td class="editable"
-        data-label="渠道" data-field="recharge_channel"
-        data-type="text"
-        data-raw="{{ a.recharge_channel or '' }}"
-        data-sort-value="{{ a.recharge_channel or '' }}">
-      {{ a.recharge_channel or '-' }}
-    </td>
-
-    <td class="text-muted small" data-label="创建">{{ a.created_at }}</td>
-    <td data-label="操作">
-     <a class="btn btn-sm btn-outline-primary" href="/t/{{ a.url_token }}" target="_blank">预览</a>
+    <td data-label="操作" class="text-nowrap">
+     <a class="btn btn-sm btn-outline-primary js-preview" href="/t/{{ a.url_token }}" target="_blank">预览</a>
+     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('access_logs', account=a.id) }}">记录</a>
      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('account_edit', aid=a.id) }}">编辑</a>
-     <form method="post" action="{{ url_for('account_delete', aid=a.id) }}" class="d-inline" onsubmit="return confirm('确定删除 {{ a.name }}？')">
+     <form method="post" action="{{ url_for('account_delete', aid=a.id) }}" class="d-inline js-delete-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-sm btn-outline-danger">删除</button>
      </form>
     </td>
    </tr>
-  {% else %}<tr><td colspan="9" class="text-center text-muted py-5">还没有账号，点右上角"+ 添加账号"开始。</td></tr>
+  {% else %}<tr><td colspan="7" class="text-center text-muted py-5">还没有账号，点右上角"+ 添加账号"开始。</td></tr>
   {% endfor %}
   </tbody></table></div>
+  <div class="text-center text-muted py-4 d-none" id="noMatch">没有符合条件的账号。</div>
 </div>
 
 <style>
-  .stats-card .stat-label {
-    font-size: 0.8rem; opacity: 0.85; margin-bottom: 4px;
-  }
-  .stats-card .stat-value {
-    font-size: 1.5rem; font-weight: 700; line-height: 1.1;
-  }
-  .stats-card .stat-value small { font-size: 0.6em; font-weight: 400; opacity: 0.85; }
-
   .table-sortable th[data-sort-type]:not([data-sort-type="none"]) {
     cursor: pointer; user-select: none; position: relative; padding-right: 1.4em;
     white-space: nowrap;
@@ -194,8 +116,25 @@
   tr.sortable-ghost { opacity: 0.4; background: #e7f1ff; }
   tr.sortable-chosen { background: #fff3cd; }
   tr.sortable-drag { background: #fff; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
-
   table.sort-active .drag-handle { cursor: not-allowed; opacity: 0.3; }
+
+  /* 用 class 而不是 hidden 属性：手机端卡片视图给 tr 设了 display:block，会盖掉 hidden */
+  #accountsTable tr.row-hidden { display: none !important; }
+  #groupChips .btn { --bs-btn-padding-y: .15rem; --bs-btn-padding-x: .6rem; --bs-btn-font-size: .8rem; border-radius: 999px; }
+
+  /* 验证码 */
+  .code-btn {
+    font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 1.15rem;
+    letter-spacing: .08em; color: #0d6efd; background: #f1f6ff; border: 1px solid #d6e4ff;
+    border-radius: 8px; padding: .15rem .6rem; min-width: 7.2em; white-space: nowrap;
+    transition: background .15s, color .15s;
+  }
+  .code-btn:hover:not(:disabled) { background: #e2ecff; }
+  .code-btn:disabled { color: #adb5bd; background: #f8f9fa; border-color: #e9ecef; }
+  .code-btn.expiring { color: #dc3545; background: #fff1f2; border-color: #f5c2c7; }
+  .code-btn.copied { color: #198754; background: #e8f5ee; border-color: #badbcc; }
+  #timerBar { transition: width 1s linear; }
+  #timerBar.expiring { background-color: #dc3545; }
 
   td.editable { cursor: text; position: relative; transition: background .15s; }
   td.editable:hover { background: #f8f9fa; }
@@ -207,130 +146,61 @@
   td.editable.editing { padding: 2px 4px !important; background: #fff3cd; }
   td.editable.editing::after { display: none; }
   td.editable input.inline-input {
-    width: 100%; padding: 4px 6px; border: 1px solid #0d6efd;
+    width: 100%; min-width: 6em; padding: 4px 6px; border: 1px solid #0d6efd;
     border-radius: 3px; font-size: 0.95em; outline: none;
     box-shadow: 0 0 0 2px rgba(13,110,253,.15);
   }
   td.editable.saving { background: #d1e7dd; }
-  td.editable.error { background: #f8d7da; }
 
-  #saveStatus { font-size: 0.9em; }
   #saveStatus.success { color: #198754; }
   #saveStatus.error { color: #dc3545; }
 
-  td.editable.date-due-soon {
-    background-color: #fff3cd !important; color: #664d03; font-weight: 600;
-  }
-  td.editable.date-due-soon:hover { background-color: #ffe8a1 !important; }
-  td.editable.date-expired {
-    background-color: #f8d7da !important; color: #842029; font-weight: 700;
-  }
-  td.editable.date-expired:hover { background-color: #f1b0b7 !important; }
-
-  /* ======== 手机端响应式（< 768px）======== */
+  /* ======== 手机端（< 768px）：表格变卡片 ======== */
   @media (max-width: 767.98px) {
-    /* 统计卡：5 列变成更紧凑的网格 */
-    .stats-card .stat-label {
-      font-size: 0.7rem;
-    }
-    .stats-card .stat-value {
-      font-size: 1.1rem;
-    }
-    .stats-card .card-body { padding: 0.75rem 0.5rem; }
-
-    /* 续费提醒：紧凑 */
-    .alert { padding: 0.6rem 0.75rem; font-size: 0.85rem; }
-    .alert .badge { font-size: 0.7rem; }
-
-    /* 使用提示：隐藏详细文字，避免占空间 */
-    .alert-light small, .alert-light code { display: none; }
-
-    /* 让链接/按钮更易点 */
+    #searchBox { max-width: none !important; width: 100%; }
     .table-responsive .btn-sm { padding: 0.3rem 0.5rem; }
 
-    /* ★ 核心：把 table 变身卡片视图 ★ */
-    #accountsTable thead { display: none; }  /* 表头隐藏 */
+    #accountsTable thead { display: none; }
     #accountsTable,
     #accountsTable tbody,
     #accountsTable tr,
     #accountsTable td { display: block; width: 100%; }
 
     #accountsTable tr {
-      background: #fff;
-      border: 1px solid #e4e7ec;
-      border-radius: 10px;
-      margin-bottom: 10px;
-      padding: 10px 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,.04);
-      position: relative;
+      background: #fff; border: 1px solid #e4e7ec; border-radius: 10px;
+      margin-bottom: 10px; padding: 10px 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.04); position: relative;
     }
-
     #accountsTable td {
-      border: none !important;
-      padding: 4px 0 !important;
-      position: relative;
-      padding-left: 80px !important;  /* 给标签让位 */
-      min-height: 24px;
-      word-break: break-all;
+      border: none !important; padding: 4px 0 !important; position: relative;
+      padding-left: 64px !important; min-height: 24px; word-break: break-all;
     }
     #accountsTable td::before {
-      content: attr(data-label);
-      position: absolute;
-      left: 0; top: 4px;
-      width: 70px;
-      color: #6c757d;
-      font-size: 0.82rem;
-      font-weight: 500;
+      content: attr(data-label); position: absolute; left: 0; top: 6px;
+      width: 56px; color: #6c757d; font-size: 0.82rem; font-weight: 500;
     }
 
-    /* 拖拽手柄单独处理：放卡片右上角 */
     #accountsTable td.drag-handle {
-      position: absolute !important;
-      top: 6px; right: 6px;
-      width: auto !important;
-      padding: 0 !important;
-      padding-left: 0 !important;
+      position: absolute !important; top: 6px; right: 6px;
+      width: auto !important; padding: 0 !important;
     }
     #accountsTable td.drag-handle::before { display: none; }
 
-    /* 名称加粗、更显眼 */
     #accountsTable td[data-label="名称"] {
-      padding-left: 0 !important;
-      font-size: 1rem;
+      padding-left: 0 !important; font-size: 1rem;
       border-bottom: 1px solid #f0f2f5 !important;
-      padding-bottom: 8px !important;
-      margin-bottom: 4px;
-      padding-right: 28px;  /* 给右上角手柄让位 */
+      padding-bottom: 8px !important; margin-bottom: 4px; padding-right: 28px;
     }
     #accountsTable td[data-label="名称"]::before { display: none; }
 
-    /* 分享链接：让 code 可以换行 */
-    #accountsTable td[data-label="链接"] code {
-      font-size: 0.75rem;
-      display: inline-block;
-      max-width: 100%;
-      white-space: normal;
-      word-break: break-all;
-    }
-
-    /* 操作按钮一行显示，居中 */
     #accountsTable td[data-label="操作"] {
-      padding-left: 0 !important;
-      border-top: 1px solid #f0f2f5 !important;
-      padding-top: 8px !important;
-      margin-top: 6px;
-      display: flex !important;
-      gap: 6px;
-      flex-wrap: wrap;
+      padding-left: 0 !important; border-top: 1px solid #f0f2f5 !important;
+      padding-top: 8px !important; margin-top: 6px;
+      display: flex !important; gap: 6px; flex-wrap: wrap;
     }
     #accountsTable td[data-label="操作"]::before { display: none; }
 
-    /* 创建时间：灰字小号 */
-    #accountsTable td[data-label="创建"] {
-      color: #adb5bd; font-size: 0.75rem;
-    }
-
-    /* 编辑悬停的 ✎ 图标在手机上没意义，隐藏 */
+    #accountsTable td[data-label="访问"] { color: #adb5bd; font-size: 0.75rem; }
     td.editable:hover::after { display: none; }
   }
 </style>
@@ -340,13 +210,6 @@
 
 {% block scripts %}
 <script>
-function copyText(btn,t){
-  navigator.clipboard.writeText(t).then(function(){
-    var o=btn.innerText;btn.innerText='已复制';
-    setTimeout(function(){btn.innerText=o},1200);
-  });
-}
-
 (function(){
   'use strict';
   var table  = document.getElementById('accountsTable');
@@ -356,8 +219,12 @@ function copyText(btn,t){
   if (!table || !tbody) return;
 
   var csrfToken = '{{ csrf_token() }}';
-  var defaultOrder = Array.prototype.slice.call(tbody.rows);
   var statusTimer = null;
+
+  function dataRows(){
+    return Array.prototype.filter.call(tbody.rows, function(r){ return r.dataset.id; });
+  }
+  var defaultOrder = Array.prototype.slice.call(tbody.rows);
 
   function showStatus(text, kind){
     if (!statusEl) return;
@@ -366,36 +233,232 @@ function copyText(btn,t){
     clearTimeout(statusTimer);
     statusTimer = setTimeout(function(){
       statusEl.textContent = ''; statusEl.className = 'ms-2';
-    }, 2500);
+    }, 3000);
   }
 
-  function isEmpty(v){ return v==null||v===''||v==='-'||/^\s*$/.test(v); }
-  var parsers = {
-    string: function(s){ return isEmpty(s)?null:String(s).trim().toLocaleLowerCase('zh-Hans-CN'); },
-    number: function(s){
-      if(isEmpty(s)) return null;
-      var n = parseFloat(String(s).replace(/[,\s人¥]/g, ''));
-      return isFinite(n)?n:null;
-    },
-    date: function(s){
-      if(isEmpty(s)) return null;
-      var t = Date.parse(String(s).trim());
-      return isNaN(t)?null:t;
+  function postJSON(url, body){
+    return fetch(url, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify(body || {})
+    }).then(function(r){
+      return r.json().then(function(j){ return { status: r.status, data: j }; });
+    });
+  }
+
+  function copyToClipboard(text){
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
     }
-  };
+    return Promise.reject(new Error('浏览器不支持自动复制'));
+  }
+
+  // ===== 实时验证码 =====
+  var codeUrl = '{{ url_for("admin_codes") }}';
+  var timerBar = document.getElementById('timerBar');
+  var timerText = document.getElementById('timerText');
+  var period = 30, remaining = 0, codesStopped = false;
+
+  function formatCode(c){ return c.replace(/(\d{3})(\d{3})/, '$1 $2'); }
+
+  function renderTimer(){
+    var expiring = remaining <= 5;
+    timerBar.style.width = Math.max(0, remaining / period * 100) + '%';
+    timerBar.classList.toggle('expiring', expiring);
+    timerText.textContent = remaining > 0 ? remaining + 's' : '--';
+    Array.prototype.forEach.call(tbody.querySelectorAll('.code-btn'), function(b){
+      if (b.dataset.code) b.classList.toggle('expiring', expiring);
+    });
+  }
+
+  function setCodes(codes){
+    dataRows().forEach(function(row){
+      var btn = row.querySelector('.code-btn');
+      if (!btn) return;
+      var code = codes ? codes[row.dataset.id] : null;
+      if (code) {
+        btn.dataset.code = code;
+        btn.disabled = false;
+        if (!btn.classList.contains('copied')) btn.textContent = formatCode(code);
+      } else {
+        btn.dataset.code = '';
+        btn.disabled = true;
+        btn.classList.remove('expiring');
+        btn.textContent = codes ? '密钥错误' : '··· ···';
+      }
+    });
+  }
+
+  function fetchCodes(){
+    if (codesStopped) return;
+    fetch(codeUrl, { credentials: 'same-origin', cache: 'no-store' }).then(function(r){
+      if (r.status === 401) {
+        codesStopped = true;
+        setCodes(null);
+        remaining = 0; renderTimer();
+        timerText.textContent = '已过期';
+        showStatus('登录已过期，请刷新页面重新登录', 'error');
+        throw new Error('expired');
+      }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function(j){
+      period = j.period; remaining = j.remaining;
+      setCodes(j.codes);
+      renderTimer();
+    }).catch(function(){
+      if (codesStopped) return;
+      remaining = 5;   // 网络抖动：5 秒后再试
+      timerText.textContent = '重试中';
+    });
+  }
+
+  setInterval(function(){
+    if (codesStopped || document.hidden) return;   // 页面不可见时不取码
+    remaining -= 1;
+    if (remaining <= 0) { fetchCodes(); } else { renderTimer(); }
+  }, 1000);
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) fetchCodes();
+  });
+  if (dataRows().length) fetchCodes();
+
+  // ===== 行内按钮：复制验证码 / 复制链接 / 换链接 / 删除确认 =====
+  tbody.addEventListener('click', function(e){
+    var row = e.target.closest('tr');
+    if (!row || !row.dataset.id) return;
+
+    var codeBtn = e.target.closest('.code-btn');
+    if (codeBtn && codeBtn.dataset.code) {
+      copyToClipboard(codeBtn.dataset.code).then(function(){
+        codeBtn.classList.add('copied');
+        codeBtn.textContent = '已复制';
+        setTimeout(function(){
+          codeBtn.classList.remove('copied');
+          if (codeBtn.dataset.code) codeBtn.textContent = formatCode(codeBtn.dataset.code);
+        }, 1000);
+      }).catch(function(err){ showStatus('✗ 复制失败：' + err.message, 'error'); });
+      return;
+    }
+
+    var copyBtn = e.target.closest('.js-copy-link');
+    if (copyBtn) {
+      copyToClipboard(row.dataset.url).then(function(){
+        var old = copyBtn.textContent; copyBtn.textContent = '已复制';
+        setTimeout(function(){ copyBtn.textContent = old; }, 1200);
+      }).catch(function(err){ showStatus('✗ 复制失败：' + err.message, 'error'); });
+      return;
+    }
+
+    var regenBtn = e.target.closest('.js-regen');
+    if (regenBtn) {
+      if (!confirm('给「' + row.dataset.name + '」换一条新的分享链接？\n\n旧链接会立即失效，正在使用的人需要拿到新链接才能继续看验证码。')) return;
+      regenBtn.disabled = true;
+      postJSON('/admin/accounts/' + row.dataset.id + '/regen').then(function(resp){
+        if (!(resp.data && resp.data.ok)) {
+          throw new Error((resp.data && resp.data.error) || ('HTTP ' + resp.status));
+        }
+        row.dataset.url = resp.data.url;
+        var linkText = row.querySelector('.js-link-text');
+        linkText.textContent = '/t/' + resp.data.url_token;
+        linkText.title = resp.data.url;
+        row.querySelector('.js-preview').href = '/t/' + resp.data.url_token;
+        return copyToClipboard(resp.data.url).then(function(){
+          showStatus('✓ 已换新链接并复制到剪贴板', 'success');
+        }, function(){
+          showStatus('✓ 已换新链接（自动复制失败，请手动点复制）', 'success');
+        });
+      }).catch(function(err){
+        showStatus('✗ 换链接失败：' + err.message, 'error');
+      }).then(function(){ regenBtn.disabled = false; });
+      return;
+    }
+
+    var editable = e.target.closest('td.editable');
+    if (editable) { startEdit(editable); }
+  });
+
+  tbody.addEventListener('submit', function(e){
+    var form = e.target.closest('.js-delete-form');
+    if (!form) return;
+    var row = form.closest('tr');
+    if (!confirm('确定删除「' + row.dataset.name + '」？删除后密钥无法恢复。')) e.preventDefault();
+  });
+
+  // ===== 搜索 + 分组筛选 =====
+  var searchBox = document.getElementById('searchBox');
+  var chipsEl = document.getElementById('groupChips');
+  var countEl = document.getElementById('filterCount');
+  var noMatchEl = document.getElementById('noMatch');
+  var groupOptions = document.getElementById('groupOptions');
+  var UNGROUPED = '\u0000ungrouped';
+  var activeGroup = null;   // null = 全部
+
+  function applyFilter(){
+    var q = searchBox.value.trim().toLocaleLowerCase();
+    var rows = dataRows(), shown = 0;
+    rows.forEach(function(row){
+      var g = row.dataset.group || '';
+      var okGroup = activeGroup === null ||
+                    (activeGroup === UNGROUPED ? g === '' : g === activeGroup);
+      var hay = (row.dataset.name + ' ' + g).toLocaleLowerCase();
+      var ok = okGroup && (!q || hay.indexOf(q) !== -1);
+      row.classList.toggle('row-hidden', !ok);
+      if (ok) shown++;
+    });
+    countEl.textContent = shown === rows.length ? '共 ' + rows.length + ' 个'
+                                               : '显示 ' + shown + ' / ' + rows.length + ' 个';
+    noMatchEl.classList.toggle('d-none', shown > 0 || rows.length === 0);
+  }
+
+  function renderChips(){
+    var counts = {}, ungrouped = 0, rows = dataRows();
+    rows.forEach(function(row){
+      var g = row.dataset.group || '';
+      if (g) counts[g] = (counts[g] || 0) + 1; else ungrouped++;
+    });
+    var names = Object.keys(counts).sort(function(a, b){ return a.localeCompare(b, 'zh-Hans-CN'); });
+    // 当前选中的分组已经没有账号了 → 回到"全部"
+    if (activeGroup !== null && activeGroup !== UNGROUPED && !counts[activeGroup]) activeGroup = null;
+    if (activeGroup === UNGROUPED && !ungrouped) activeGroup = null;
+
+    chipsEl.textContent = '';
+    groupOptions.textContent = '';
+    if (!names.length) return;   // 还没分过组就不显示筛选条
+    function chip(label, value, n){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn btn-sm ' + (activeGroup === value ? 'btn-primary' : 'btn-outline-secondary');
+      b.textContent = label + ' ' + n;
+      b.addEventListener('click', function(){ activeGroup = value; renderChips(); applyFilter(); });
+      chipsEl.appendChild(b);
+    }
+    chip('全部', null, rows.length);
+    names.forEach(function(g){
+      chip(g, g, counts[g]);
+      var opt = document.createElement('option'); opt.value = g; groupOptions.appendChild(opt);
+    });
+    if (ungrouped) chip('未分组', UNGROUPED, ungrouped);
+  }
+
+  searchBox.addEventListener('input', applyFilter);
+  renderChips();
+  applyFilter();
+
+  // ===== 表头排序 =====
+  function isEmpty(v){ return v==null||v===''||v==='-'||/^\s*$/.test(v); }
+  function sortKey(s){ return isEmpty(s) ? null : String(s).trim().toLocaleLowerCase('zh-Hans-CN'); }
   function cellValue(td){
     var dv = td.getAttribute('data-sort-value');
     return dv!==null ? dv : (td.textContent || '');
   }
-  function cmp(a,b,type,dir){
-    var pa = parsers[type] ? parsers[type](a) : parsers.string(a);
-    var pb = parsers[type] ? parsers[type](b) : parsers.string(b);
+  function cmp(a,b,dir){
+    var pa = sortKey(a), pb = sortKey(b);
     if(pa===null && pb===null) return 0;
-    if(pa===null) return 1;
+    if(pa===null) return 1;      // 空值永远排最后
     if(pb===null) return -1;
-    if(pa<pb) return dir==='asc'?-1:1;
-    if(pa>pb) return dir==='asc'?1:-1;
-    return 0;
+    var c = pa.localeCompare(pb, 'zh-Hans-CN', { numeric: true });
+    return dir==='asc' ? c : -c;
   }
   function clearSortArrows(){
     Array.prototype.forEach.call(table.tHead.rows[0].cells, function(h){
@@ -432,8 +495,8 @@ function copyText(btn,t){
       } else {
         table.classList.add('sort-active');
         var dir = next==='ascending'?'asc':'desc';
-        var ordered = Array.prototype.slice.call(tbody.rows).sort(function(r1,r2){
-          return cmp(cellValue(r1.cells[colIdx]), cellValue(r2.cells[colIdx]), type, dir);
+        var ordered = dataRows().sort(function(r1,r2){
+          return cmp(cellValue(r1.cells[colIdx]), cellValue(r2.cells[colIdx]), dir);
         });
         var frag = document.createDocumentFragment();
         ordered.forEach(function(r){ frag.appendChild(r); });
@@ -452,6 +515,7 @@ function copyText(btn,t){
     });
   }
 
+  // ===== 拖拽排序 =====
   if (typeof Sortable !== 'undefined') {
     Sortable.create(tbody, {
       handle: '.drag-handle',
@@ -464,225 +528,86 @@ function copyText(btn,t){
       },
       onEnd: function(evt){
         if (evt.oldIndex === evt.newIndex) return;
-        var ids = Array.prototype.slice.call(tbody.rows).map(function(r){
-          return parseInt(r.dataset.id, 10);
-        }).filter(function(n){ return !isNaN(n); });
+        var ids = dataRows().map(function(r){ return parseInt(r.dataset.id, 10); });
         showStatus('保存顺序中...', 'success');
-        fetch('{{ url_for("accounts_reorder") }}', {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-          body: JSON.stringify({ order: ids })
-        }).then(function(r){ return r.json(); }).then(function(j){
-          if (j && j.ok) {
+        postJSON('{{ url_for("accounts_reorder") }}', { order: ids }).then(function(resp){
+          if (resp.data && resp.data.ok) {
             showStatus('✓ 顺序已保存', 'success');
             defaultOrder = Array.prototype.slice.call(tbody.rows);
           } else {
-            showStatus('✗ 保存失败', 'error');
+            showStatus('✗ 保存失败：' + ((resp.data && resp.data.error) || resp.status), 'error');
           }
         }).catch(function(){ showStatus('✗ 网络错误', 'error'); });
       }
     });
   }
 
-  // ===== 内联编辑（修复 bug 版本）=====
-  var activeEditor = null;
+  // ===== 分组单元格内联编辑 =====
+  var editing = null;   // 同一时间只允许编辑一个单元格
 
-  // 统一释放锁的函数 - 无论任何退出路径都通过它
-  function releaseLock(td) {
-    if (td) {
-      td.classList.remove('editing', 'saving', 'error');
-    }
-    activeEditor = null;
-  }
-
-  function buildInput(type, raw){
-    var el;
-    if (type === 'date-mmdd') {
-      el = document.createElement('input'); el.type = 'text';
-      el.placeholder = '月-日，如 05-20'; el.maxLength = 10;
-      if (raw && raw.length >= 10) {
-        el.value = raw.substring(5);
-      } else {
-        el.value = '';
-      }
-    } else if (type === 'number') {
-      el = document.createElement('input'); el.type = 'number';
-      el.min = '1'; el.max = '99'; el.step = '1'; el.value = raw || '';
-    } else if (type === 'number-decimal') {
-      el = document.createElement('input'); el.type = 'number';
-      el.min = '0'; el.step = '1';
-      el.value = raw ? String(parseInt(parseFloat(raw), 10)) : '';
+  function renderGroupCell(td, value){
+    td.dataset.raw = value;
+    td.dataset.sortValue = value;
+    td.textContent = '';
+    if (value) {
+      td.textContent = value;
     } else {
-      el = document.createElement('input'); el.type = 'text';
-      el.maxLength = 50; el.value = raw || '';
+      var dash = document.createElement('span');
+      dash.className = 'text-muted'; dash.textContent = '-';
+      td.appendChild(dash);
     }
-    el.className = 'inline-input';
-    return el;
   }
 
   function startEdit(td){
-    if (activeEditor) return;
-    if (td.classList.contains('editing')) return;
-
-    var field  = td.dataset.field;
-    var type   = td.dataset.type;
-    var rawVal = td.dataset.raw || '';
-    var originalHTML = td.innerHTML;
-
-    var input = buildInput(type, rawVal);
-    td.innerHTML = '';
+    if (editing) return;
+    var oldVal = td.dataset.raw || '';
+    var input = document.createElement('input');
+    input.type = 'text'; input.maxLength = 30; input.value = oldVal;
+    input.className = 'inline-input';
+    input.setAttribute('list', 'groupOptions');
+    input.placeholder = '分组名，留空 = 未分组';
+    td.textContent = '';
     td.appendChild(input);
     td.classList.add('editing');
-    activeEditor = { td: td, input: input };
-
-    setTimeout(function(){
-      input.focus();
-      if (input.select) try { input.select(); } catch(e){}
-    }, 0);
+    editing = td;
+    input.focus(); input.select();
 
     var finished = false;
-
-    function cancel(){
-      if (finished) return;
-      finished = true;
-      td.innerHTML = originalHTML;
-      releaseLock(td);
+    function finish(value){
+      td.classList.remove('editing', 'saving');
+      renderGroupCell(td, value);
+      editing = null;
     }
-
     function commit(){
       if (finished) return;
       finished = true;
       var newVal = input.value.trim();
-
-      // 与原值相同 → 直接取消
-      var sameAsOld = false;
-      if (type === 'date-mmdd') {
-        var oldMmDd = (rawVal && rawVal.length >= 10) ? rawVal.substring(5) : '';
-        sameAsOld = (newVal === oldMmDd);
-      } else if (type === 'number-decimal') {
-        var oldInt = rawVal ? String(parseInt(parseFloat(rawVal), 10)) : '';
-        sameAsOld = (newVal === oldInt);
-      } else {
-        sameAsOld = (newVal === rawVal);
-      }
-      if (sameAsOld) {
-        td.innerHTML = originalHTML;
-        releaseLock(td);
-        return;
-      }
-
+      if (newVal === oldVal) { finish(oldVal); return; }
       td.classList.remove('editing');
       td.classList.add('saving');
       var row = td.closest('tr');
-      var aid = row.dataset.id;
-
-      fetch('/admin/accounts/' + aid + '/field', {
-        method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-        body: JSON.stringify({ field: field, value: newVal })
-      }).then(function(r){
-        return r.json().then(function(j){ return {status: r.status, data: j}; });
-      }).then(function(resp){
-        if (resp.data && resp.data.ok) {
-          // 成功分支
-          td.dataset.raw = resp.data.raw_value !== undefined ? resp.data.raw_value : newVal;
-          td.dataset.sortValue = resp.data.sort_value || '';
-          var newHTML;
-          if (!newVal || resp.data.display === '-') {
-            newHTML = '<span class="text-muted">-</span>';
-            td.dataset.raw = '';
-          } else if (field === 'renewal_amount') {
-            var num = parseFloat(resp.data.raw_value || newVal);
-            if (isFinite(num)) {
-              newHTML = '¥' + Math.floor(num);
-              td.dataset.sortValue = String(num);
-            } else {
-              newHTML = '<span class="text-muted">-</span>';
-            }
-          } else if (field === 'renewal_date') {
-            var full = resp.data.raw_value || newVal;
-            if (full && full.length >= 10) {
-              newHTML = full.substring(5);
-              td.dataset.sortValue = full;
-            } else {
-              newHTML = '<span class="text-muted">-</span>';
-            }
-          } else {
-            newHTML = resp.data.display;
-          }
-          td.innerHTML = newHTML;
-          releaseLock(td);
-          showStatus('✓ 已保存', 'success');
-          defaultOrder = Array.prototype.slice.call(tbody.rows);
-        } else {
-          // 失败分支：恢复原样，立即释放锁
-          var msg = (resp.data && resp.data.error) ? resp.data.error : ('HTTP ' + resp.status);
-          td.innerHTML = originalHTML;
-          releaseLock(td);
-          showStatus('✗ ' + msg, 'error');
+      postJSON('/admin/accounts/' + row.dataset.id + '/field',
+               { field: td.dataset.field, value: newVal }).then(function(resp){
+        if (!(resp.data && resp.data.ok)) {
+          throw new Error((resp.data && resp.data.error) || ('HTTP ' + resp.status));
         }
-      }).catch(function(e){
-        // 网络错误：恢复原样，立即释放锁
-        td.innerHTML = originalHTML;
-        releaseLock(td);
-        showStatus('✗ 网络错误：' + (e.message || ''), 'error');
+        finish(resp.data.raw_value || '');
+        row.dataset.group = resp.data.raw_value || '';
+        renderChips();
+        applyFilter();
+        showStatus('✓ 已保存', 'success');
+      }).catch(function(err){
+        finish(oldVal);
+        showStatus('✗ ' + err.message, 'error');
       });
     }
-
     input.addEventListener('keydown', function(e){
       if (e.key === 'Enter') { e.preventDefault(); commit(); }
-      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+      else if (e.key === 'Escape') { e.preventDefault(); finished = true; finish(oldVal); }
     });
-    input.addEventListener('blur', function(){
-      setTimeout(function(){ if (!finished) commit(); }, 100);
-    });
+    input.addEventListener('blur', commit);
+    input.addEventListener('click', function(e){ e.stopPropagation(); });
   }
-
-  tbody.addEventListener('click', function(e){
-    var td = e.target.closest('td.editable');
-    if (!td) return;
-    if (td.classList.contains('editing')) return;
-    // 如果有正在编辑的其他单元格，先提交或取消
-    if (activeEditor && activeEditor.td !== td) {
-      // 触发当前编辑框的 blur，其 setTimeout commit 会执行
-      // 然后再启动新的编辑（延时一下）
-      activeEditor.input.blur();
-      setTimeout(function(){
-        if (!activeEditor) startEdit(td);
-      }, 200);
-      return;
-    }
-    startEdit(td);
-  });
-
-  // 全局 Esc 键：如果有卡住的编辑框，强制释放
-  document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape' && activeEditor) {
-      var td = activeEditor.td;
-      td.innerHTML = td.querySelector('.inline-input') ? td.innerHTML : td.innerHTML;
-      // 读取一份当前 dataset.raw 的状态重新构造展示
-      var rawVal = td.dataset.raw || '';
-      var field = td.dataset.field;
-      var display = '-';
-      if (rawVal) {
-        if (field === 'renewal_amount') {
-          display = '¥' + Math.floor(parseFloat(rawVal));
-        } else if (field === 'renewal_date') {
-          display = rawVal.length >= 10 ? rawVal.substring(5) : rawVal;
-        } else if (field === 'share_count') {
-          display = rawVal + ' 人';
-        } else {
-          display = rawVal;
-        }
-      }
-      if (display === '-') {
-        td.innerHTML = '<span class="text-muted">-</span>';
-      } else {
-        td.textContent = display;
-      }
-      releaseLock(td);
-    }
-  });
 })();
 </script>
 {% endblock %}

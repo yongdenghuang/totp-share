@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}访问记录{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0">访问记录</h4>
+  <form method="get" class="d-flex gap-2">
+    <select class="form-select form-select-sm" name="account" onchange="this.form.submit()" style="min-width:200px">
+      <option value="">全部账号</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}" {% if a.id == account_id %}selected{% endif %}>{{ a.name }}</option>
+      {% endfor %}
+    </select>
+    <noscript><button class="btn btn-sm btn-primary">筛选</button></noscript>
+  </form>
+</div>
+
+<p class="text-muted small">
+  记录谁通过分享链接看过验证码。时间为北京时间；同一访客 {{ merge_minutes }} 分钟内的连续查看合并成一条；
+  你自己登录后台后点「预览」不计入。记录保留 {{ retention_days }} 天。
+</p>
+
+<div class="card">
+ <div class="table-responsive"><table class="table table-hover mb-0 align-middle">
+  <thead class="table-light">
+    <tr>
+      <th>时间</th>
+      <th>账号</th>
+      <th>事件</th>
+      <th>IP</th>
+      <th>地区</th>
+      <th>设备</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for l in logs %}
+    <tr>
+      <td class="text-nowrap">
+        {{ l.created_at|cn_time('%m-%d %H:%M') }}
+        {% if l.last_seen_at[:16] != l.created_at[:16] %}
+          <span class="text-muted">→ {{ l.last_seen_at|cn_time('%H:%M') }}</span>
+        {% endif %}
+      </td>
+      <td>{{ l.account_name }}</td>
+      <td>
+        {% if l.event == 'pw_fail' %}
+          <span class="badge bg-danger">密码错误{% if l.hits > 1 %} ×{{ l.hits }}{% endif %}</span>
+        {% else %}
+          <span class="badge bg-success-subtle text-success-emphasis">查看验证码</span>
+        {% endif %}
+      </td>
+      <td class="font-monospace small">{{ l.ip or '-' }}</td>
+      <td>{{ l.country or '-' }}</td>
+      <td class="small" title="{{ l.user_agent or '' }}">{{ l.user_agent|ua_brief }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="text-center text-muted py-5">还没有访问记录。</td></tr>
+  {% endfor %}
+  </tbody>
+ </table></div>
+</div>
+
+{% if page > 1 or has_next %}
+<div class="d-flex justify-content-between mt-3">
+  {% if page > 1 %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('access_logs', account=account_id, page=page-1) }}">← 更新的</a>
+  {% else %}<span></span>{% endif %}
+  <span class="text-muted small align-self-center">第 {{ page }} 页</span>
+  {% if has_next %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('access_logs', account=account_id, page=page+1) }}">更早的 →</a>
+  {% else %}<span></span>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

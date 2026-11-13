@@ -3,98 +3,102 @@
 {% block content %}
 <div class="row justify-content-center"><div class="col-lg-8">
  {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+ {% if dup_warning %}<div class="alert alert-warning">⚠️ {{ dup_warning }}</div>{% endif %}
 
- <form method="post">
+ <form method="post" autocomplete="off">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if dup_warning %}<input type="hidden" name="confirm_duplicate" value="1" id="confirmDuplicate">{% endif %}
 
   <div class="card p-4 mb-3">
     <h5 class="mb-3">{{ '添加新账号' if mode=='new' else '编辑账号' }}</h5>
 
     <div class="mb-3">
-      <label class="form-label">账号名称 <span class="text-danger">*</span></label>
-      <input class="form-control" name="name" value="{{ account.name or '' }}" required maxlength="100">
-      <div class="form-text">例如：主邮箱、银行APP、公司OA等</div>
+      <label class="form-label" for="name">账号名称 <span class="text-danger">*</span></label>
+      <input class="form-control" id="name" name="name" value="{{ account.name or '' }}" required maxlength="100">
+      <div class="form-text text-warning-emphasis d-none" id="dupHint">已有同名账号，保存时会再提醒一次。</div>
     </div>
 
     <div class="mb-3">
-      <label class="form-label">TOTP 密钥（Base32）{% if mode=='new' %} <span class="text-danger">*</span>{% endif %}</label>
-      <input class="form-control font-monospace" name="secret" value="{{ account.secret or '' }}"
+      <label class="form-label" for="group_name">分组</label>
+      <input class="form-control" id="group_name" name="group_name" list="groupOptions" maxlength="30"
+             value="{{ account.group_name or '' }}" placeholder="例如：plus、pro20x、plus代充">
+      <datalist id="groupOptions">{% for g in group_options %}<option value="{{ g }}">{% endfor %}</datalist>
+      <div class="form-text">可选。输入新名字即新建分组，列表页可按分组筛选。</div>
+    </div>
+
+    <div class="mb-0">
+      <label class="form-label" for="secret">TOTP 密钥（Base32）{% if mode=='new' %} <span class="text-danger">*</span>{% endif %}</label>
+      <input class="form-control font-monospace" id="secret" name="secret" value="{{ account.secret or '' }}"
              placeholder="JBSWY3DPEHPK3PXP" {% if mode=='new' %}required{% endif %}>
       <div class="form-text">
         从 Authenticator App 或原始二维码中获取。A-Z 与 2-7 字符组成，长度 16+。
         {% if mode=='edit' %}留空表示不修改密钥。{% endif %}
       </div>
     </div>
+  </div>
+
+  <div class="card p-4 mb-3">
+    <h6 class="mb-3">分享链接</h6>
+
+    <div class="mb-3">
+      <label class="form-label" for="link_password">此链接的单独密码
+        {% if account.has_own_password %}<span class="badge bg-success ms-1">已设置</span>{% endif %}
+      </label>
+      <input class="form-control" id="link_password" name="link_password" maxlength="128"
+             value="{{ account.link_password or '' }}"
+             placeholder="{{ '留空表示不修改' if account.has_own_password else '留空表示不单独设密码' }}">
+      <div class="form-text">
+        至少 4 位。设了单独密码后，打开这条链接只认这个密码。
+        没设的链接{% if share_pw_enabled %}使用「设置」里的统一密码{% else %}目前无需密码（「设置」里的统一密码未开启）{% endif %}。
+      </div>
+    </div>
 
     {% if mode=='edit' %}
+    {% if account.has_own_password %}
     <div class="form-check mb-2">
-      <input class="form-check-input" type="checkbox" id="regen" name="regen_url" value="1">
+      <input class="form-check-input" type="checkbox" id="clearpw" name="clear_link_password" value="1"
+             {% if account.clear_link_password %}checked{% endif %}>
+      <label class="form-check-label" for="clearpw">清除单独密码（改回跟随统一设置）</label>
+    </div>
+    {% endif %}
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" id="regen" name="regen_url" value="1"
+             {% if account.regen_url %}checked{% endif %}>
       <label class="form-check-label" for="regen">重新生成分享链接（旧链接立即失效）</label>
     </div>
     {% endif %}
   </div>
 
-  <div class="card p-4 mb-3">
-    <h6 class="mb-1">合租与续费信息</h6>
-    <p class="text-muted small mb-3">可选，留空不影响现有功能。续费相关 4 个字段（周期/日期/金额/币种）需一起填写才显示"剩余价值"。</p>
-
-    <div class="row g-3">
-      <div class="col-md-4">
-        <label class="form-label">合租人数</label>
-        <input type="number" class="form-control" name="share_count"
-               min="1" max="99" placeholder="1-99"
-               value="{{ account.share_count if account.share_count else '' }}">
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">续费周期</label>
-        <select class="form-select" name="renewal_period">
-          <option value="">— 不选 —</option>
-          {% for v, label in periods %}
-            <option value="{{ v }}"
-              {% if account.renewal_period and account.renewal_period|int == v %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">续费日期</label>
-        <input type="date" class="form-control" name="renewal_date"
-               value="{{ account.renewal_date or '' }}">
-        <div class="form-text">本次续费当天</div>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">续费金额</label>
-        <input type="number" class="form-control" name="renewal_amount"
-               min="0" step="0.01" placeholder="128.50"
-               value="{{ account.renewal_amount or '' }}">
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">币种</label>
-        <select class="form-select" name="currency">
-          <option value="">— 不选 —</option>
-          {% for code, label in currencies %}
-            <option value="{{ code }}" {% if account.currency == code %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">充值渠道</label>
-        <input class="form-control" name="recharge_channel" maxlength="50"
-               placeholder="例如：支付宝、PayPal"
-               value="{{ account.recharge_channel or '' }}">
-        <div class="form-text">最多 50 字</div>
-      </div>
-    </div>
-  </div>
-
   <div class="d-flex gap-2">
-    <button class="btn btn-primary">保存</button>
+    <button class="btn btn-primary">{{ '确认保存' if dup_warning else '保存' }}</button>
     <a class="btn btn-outline-secondary" href="{{ url_for('dashboard') }}">取消</a>
   </div>
  </form>
 </div></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  // 输入名称时即时提示重名（最终以保存时服务端的检查为准）
+  var existing = {{ existing_names|tojson }}.map(norm);
+  var nameEl = document.getElementById('name');
+  var hint = document.getElementById('dupHint');
+  var confirmEl = document.getElementById('confirmDuplicate');
+  var original = norm(nameEl.defaultValue);
+  var isEdit = {{ 'true' if mode == 'edit' else 'false' }};
+  function norm(s){ return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+  function check(){
+    var v = norm(nameEl.value);
+    var unchanged = isEdit && v === original && !confirmEl;
+    hint.classList.toggle('d-none', !v || unchanged || existing.indexOf(v) === -1);
+  }
+  nameEl.addEventListener('input', function(){
+    // 改了名字后，之前对重名的确认不再作数
+    if (confirmEl) { confirmEl.remove(); confirmEl = null; }
+    check();
+  });
+  check();
+})();
+</script>
 {% endblock %}

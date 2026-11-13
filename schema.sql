@@ -1,3 +1,5 @@
+-- 全新安装时的基础表。之后新增的列和表由 migrate.py 的 ensure_schema() 补齐，
+-- 应用启动时会自动执行，所以这里不需要随版本改动。
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 
