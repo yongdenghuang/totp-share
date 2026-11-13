@@ -19,7 +19,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
 from cryptography.fernet import Fernet, InvalidToken
 
-from migrate import ensure_schema
+from migrate import ensure_schema, next_group_color
 
 app = Flask(__name__)
 app.config.update(
@@ -326,6 +326,7 @@ def dashboard():
         """SELECT account_id, MAX(last_seen_at) AS seen FROM access_logs
            WHERE event='view' GROUP BY account_id""")}
     name_counts = Counter(norm_name(r["name"]) for r in rows)
+    groups = group_rows()
     accounts = [{
         "id": r["id"], "name": r["name"], "url_token": r["url_token"],
         "created_at": r["created_at"],
@@ -334,7 +335,10 @@ def dashboard():
         "is_duplicate": name_counts[norm_name(r["name"])] > 1,
         "last_seen": last_seen.get(r["id"]),
     } for r in rows]
-    return render_template("dashboard.html", accounts=accounts, groups=list_groups(),
+    styles = {g["name"]: g for g in groups}
+    for a in accounts:
+        a["group_style"] = styles.get(a["group_name"])
+    return render_template("dashboard.html", accounts=accounts, groups=groups,
                            base_url=request.host_url.rstrip("/"),
                            share_pw_enabled=get_setting("share_password_enabled") == "1")
 
@@ -359,6 +363,26 @@ def parse_group_name(raw):
     s = re.sub(r"\s+", " ", raw or "").strip()[:30]
     return s or None
 
+def parse_color(raw):
+    """分组颜色只接受 #rrggbb；颜色会写进页面的 style 属性，必须严格校验。"""
+    s = (raw or "").strip().lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", s):
+        raise ValueError("颜色格式不正确")
+    return s
+
+def text_color_on(bg):
+    """在这个底色上用白字还是深色字更清楚（按感知亮度判断）。"""
+    r, g, b = (int(bg[i:i + 2], 16) for i in (1, 3, 5))
+    return "#1f2937" if (0.299 * r + 0.587 * g + 0.114 * b) > 160 else "#ffffff"
+
+def group_rows():
+    """全部分组及其标签配色：[{"name", "color", "text"}]，按创建顺序。"""
+    out = []
+    for r in query_all("SELECT name, color FROM account_groups ORDER BY id"):
+        color = r["color"] or "#6c757d"
+        out.append({"name": r["name"], "color": color, "text": text_color_on(color)})
+    return out
+
 def list_groups():
     return [r["name"] for r in query_all("SELECT name FROM account_groups ORDER BY id")]
 
@@ -377,7 +401,9 @@ def create_group(raw):
     existing = find_group(name)
     if existing:
         return existing
-    execute("INSERT INTO account_groups(name) VALUES (?)", (name,))
+    used = [r["color"] for r in query_all("SELECT color FROM account_groups")]
+    execute("INSERT INTO account_groups(name, color) VALUES (?, ?)",
+            (name, next_group_color(used)))
     return name
 
 def resolve_group(raw):
@@ -603,11 +629,15 @@ def groups_page():
                 clash = find_group(new)
                 if clash and clash != old:
                     raise ValueError(f"分组「{clash}」已存在")
+                color = request.form.get("color")
+                color = parse_color(color) if color else None   # 没带颜色 = 不改颜色
                 db = get_db()   # 分组表和账号上的分组名一起改，要么都成要么都不成
+                if color:
+                    db.execute("UPDATE account_groups SET color=? WHERE name=?", (color, old))
                 db.execute("UPDATE account_groups SET name=? WHERE name=?", (new, old))
                 db.execute("UPDATE accounts SET group_name=? WHERE group_name=?", (new, old))
                 db.commit()
-                msg = f"已把「{old}」改名为「{new}」"
+                msg = f"已把「{old}」改名为「{new}」" if new != old else f"已保存「{new}」"
             elif action == "delete":
                 old = find_group(request.form.get("old_name", ""))
                 if not old:
@@ -623,7 +653,7 @@ def groups_page():
         "SELECT group_name, COUNT(*) AS n FROM accounts "
         "WHERE group_name IS NOT NULL GROUP BY group_name")}
     return render_template("groups.html", error=error, msg=msg,
-                           groups=[{"name": g, "count": counts.get(g, 0)} for g in list_groups()])
+                           groups=[dict(g, count=counts.get(g["name"], 0)) for g in group_rows()])
 
 # ---------- 设置 ----------
 @app.route("/admin/settings", methods=["GET", "POST"])

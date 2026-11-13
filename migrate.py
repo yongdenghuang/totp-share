@@ -18,6 +18,33 @@ ACCOUNT_COLUMNS = [
     ("share_password_hash", "TEXT"),   # 此链接的单独密码；NULL = 跟随统一设置
 ]
 
+# 分组标签的默认配色：新建分组时按顺序取第一个还没被用过的颜色。
+# 都是配白字也看得清的深色；红色放在最后，免得和"验证码快过期"的红色混淆。
+GROUP_PALETTE = [
+    "#2563eb",  # 蓝
+    "#16a34a",  # 绿
+    "#ea580c",  # 橙
+    "#7c3aed",  # 紫
+    "#0d9488",  # 青
+    "#db2777",  # 粉
+    "#a16207",  # 棕黄
+    "#0891b2",  # 湖蓝
+    "#4f46e5",  # 靛
+    "#4d7c0f",  # 橄榄绿
+    "#57534e",  # 灰
+    "#dc2626",  # 红
+]
+
+
+def next_group_color(used):
+    """第一个没被用过的调色板颜色；调色板用完了就按已有分组数循环取。"""
+    taken = {(c or "").lower() for c in used}
+    for color in GROUP_PALETTE:
+        if color not in taken:
+            return color
+    return GROUP_PALETTE[len(taken) % len(GROUP_PALETTE)]
+
+
 GROUPS_SQL = """
 CREATE TABLE IF NOT EXISTS account_groups (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,6 +98,16 @@ def ensure_schema(db):
     db.execute("""INSERT OR IGNORE INTO account_groups(name)
                   SELECT DISTINCT group_name FROM accounts
                   WHERE group_name IS NOT NULL AND group_name <> ''""")
+
+    if "color" not in {r[1] for r in db.execute("PRAGMA table_info(account_groups)")}:
+        db.execute("ALTER TABLE account_groups ADD COLUMN color TEXT")
+        changes.append("account_groups.color")
+    # 还没有颜色的分组，按创建顺序各分一个不重复的颜色
+    used = [r[0] for r in db.execute("SELECT color FROM account_groups WHERE color IS NOT NULL")]
+    for (gid,) in db.execute("SELECT id FROM account_groups WHERE color IS NULL ORDER BY id").fetchall():
+        color = next_group_color(used)
+        db.execute("UPDATE account_groups SET color=? WHERE id=?", (color, gid))
+        used.append(color)
 
     db.commit()
     return changes

@@ -19,9 +19,10 @@
          placeholder="搜索名称 / 分组" autocomplete="off" style="max-width:240px">
   <div class="d-flex flex-wrap gap-1" id="groupChips"></div>
   <span class="text-muted small" id="filterCount"></span>
-  <div class="ms-auto d-flex align-items-center gap-2" id="codeTimer" title="验证码每 30 秒更新一次">
-    <div class="progress" style="width:90px;height:6px"><div class="progress-bar" id="timerBar" style="width:100%"></div></div>
-    <span class="small text-muted" id="timerText" style="min-width:2.4em">--</span>
+  {# 倒计时在桌面端放在「验证码」表头里；手机端表头不显示，所以这里留一份 #}
+  <div class="ms-auto d-flex d-md-none align-items-center gap-2" title="验证码每 30 秒更新一次">
+    <div class="progress" style="width:90px;height:6px"><div class="progress-bar js-timer-bar" style="width:100%"></div></div>
+    <span class="small text-muted fw-normal js-timer-text" style="min-width:2.4em">--</span>
   </div>
 </div>
 <div class="small text-muted mb-3">
@@ -36,7 +37,12 @@
       <th data-sort-type="none" style="width:36px" title="拖拽排序"></th>
       <th data-sort-type="string">名称</th>
       <th data-sort-type="string" class="editable-col">分组</th>
-      <th data-sort-type="none">验证码</th>
+      <th data-sort-type="none" title="验证码每 30 秒更新一次">
+        <div class="d-flex align-items-center gap-2">验证码
+    <div class="progress" style="width:64px;height:6px"><div class="progress-bar js-timer-bar" style="width:100%"></div></div>
+    <span class="small text-muted fw-normal js-timer-text" style="min-width:2.4em">--</span>
+        </div>
+      </th>
       <th data-sort-type="none">分享链接</th>
       <th data-sort-type="string">最近访问</th>
       <th data-sort-type="none">操作</th>
@@ -47,7 +53,9 @@
    <tr data-id="{{ a.id }}" data-name="{{ a.name }}" data-group="{{ a.group_name }}"
        data-url="{{ base_url }}/t/{{ a.url_token }}">
     <td class="drag-handle text-center" data-label="" title="按住拖动">⋮⋮</td>
-    <td data-label="名称" title="创建于 {{ a.created_at }}"><strong>{{ a.name }}</strong>
+    <td data-label="名称" title="创建于 {{ a.created_at }}" data-sort-value="{{ a.name }}">
+      <span class="group-tag js-group-tag{% if not a.group_style %} d-none{% endif %}"
+            {% if a.group_style %}style="background:{{ a.group_style.color }};color:{{ a.group_style.text }}"{% endif %}>{{ a.group_name }}</span><strong>{{ a.name }}</strong>
       {% if a.is_duplicate %}<span class="badge bg-warning text-dark ms-1" title="有其他账号用了同样的名称">重名</span>{% endif %}
     </td>
 
@@ -132,8 +140,20 @@
   .code-btn:disabled { color: #adb5bd; background: #f8f9fa; border-color: #e9ecef; }
   .code-btn.expiring { color: #dc3545; background: #fff1f2; border-color: #f5c2c7; }
   .code-btn.copied { color: #198754; background: #e8f5ee; border-color: #badbcc; }
-  #timerBar { transition: width 1s linear; }
-  #timerBar.expiring { background-color: #dc3545; }
+  .js-timer-bar { transition: width 1s linear; }
+  .js-timer-bar.expiring { background-color: #dc3545; }
+
+  /* 分组标签：名称前的彩色小标签，颜色来自分组设置 */
+  .group-tag {
+    display: inline-block; vertical-align: middle; margin-right: .45rem;
+    padding: .1rem .5rem; border-radius: 999px;
+    font-size: .72rem; font-weight: 600; line-height: 1.5; white-space: nowrap;
+  }
+  .group-dot {
+    display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
+    margin-right: .3rem; vertical-align: middle;
+    box-shadow: 0 0 0 1.5px #fff;   /* 选中的筛选按钮是蓝底，加一圈白边保证圆点看得见 */
+  }
 
   td.editable { cursor: text; position: relative; transition: background .15s; }
   td.editable:hover { background: #f8f9fa; }
@@ -254,17 +274,22 @@
 
   // ===== 实时验证码 =====
   var codeUrl = '{{ url_for("admin_codes") }}';
-  var timerBar = document.getElementById('timerBar');
-  var timerText = document.getElementById('timerText');
+  var timerBars = document.querySelectorAll('.js-timer-bar');     // 表头一份，手机端筛选条一份
+  var timerTexts = document.querySelectorAll('.js-timer-text');
+  function setTimerText(t){
+    Array.prototype.forEach.call(timerTexts, function(el){ el.textContent = t; });
+  }
   var period = 30, remaining = 0, codesStopped = false;
 
   function formatCode(c){ return c.replace(/(\d{3})(\d{3})/, '$1 $2'); }
 
   function renderTimer(){
     var expiring = remaining <= 5;
-    timerBar.style.width = Math.max(0, remaining / period * 100) + '%';
-    timerBar.classList.toggle('expiring', expiring);
-    timerText.textContent = remaining > 0 ? remaining + 's' : '--';
+    Array.prototype.forEach.call(timerBars, function(bar){
+      bar.style.width = Math.max(0, remaining / period * 100) + '%';
+      bar.classList.toggle('expiring', expiring);
+    });
+    setTimerText(remaining > 0 ? remaining + 's' : '--');
     Array.prototype.forEach.call(tbody.querySelectorAll('.code-btn'), function(b){
       if (b.dataset.code) b.classList.toggle('expiring', expiring);
     });
@@ -295,7 +320,7 @@
         codesStopped = true;
         setCodes(null);
         remaining = 0; renderTimer();
-        timerText.textContent = '已过期';
+        setTimerText('已过期');
         showStatus('登录已过期，请刷新页面重新登录', 'error');
         throw new Error('expired');
       }
@@ -308,7 +333,7 @@
     }).catch(function(){
       if (codesStopped) return;
       remaining = 5;   // 网络抖动：5 秒后再试
-      timerText.textContent = '重试中';
+      setTimerText('重试中');
     });
   }
 
@@ -389,7 +414,20 @@
   var chipsEl = document.getElementById('groupChips');
   var countEl = document.getElementById('filterCount');
   var noMatchEl = document.getElementById('noMatch');
-  var allGroups = {{ groups|tojson }};   // 分组表里的全部分组，包括还没有账号的
+  var groupMeta = {};                    // 分组名 → {color, text}，标签配色
+  var allGroups = {{ groups|tojson }}.map(function(g){ groupMeta[g.name] = g; return g.name; });
+  // ↑ 分组表里的全部分组名，包括还没有账号的
+
+  function paintGroupTag(row){
+    var tag = row.querySelector('.js-group-tag');
+    var g = row.dataset.group || '';
+    var meta = groupMeta.hasOwnProperty(g) ? groupMeta[g] : null;
+    if (!tag) return;
+    tag.classList.toggle('d-none', !meta);
+    tag.textContent = meta ? meta.name : '';
+    tag.style.background = meta ? meta.color : '';
+    tag.style.color = meta ? meta.text : '';
+  }
   var groupsUrl = '{{ url_for("groups_page") }}';
   var UNGROUPED = '\u0000ungrouped';
   var activeGroup = null;   // null = 全部
@@ -432,7 +470,13 @@
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'btn btn-sm ' + (activeGroup === value ? 'btn-primary' : 'btn-outline-secondary');
-      b.textContent = label + ' ' + n;
+      if (typeof value === 'string' && groupMeta.hasOwnProperty(value)) {
+        var dot = document.createElement('span');
+        dot.className = 'group-dot';
+        dot.style.background = groupMeta[value].color;
+        b.appendChild(dot);
+      }
+      b.appendChild(document.createTextNode(label + ' ' + n));
       b.addEventListener('click', function(){ activeGroup = value; renderChips(); applyFilter(); });
       chipsEl.appendChild(b);
     }
@@ -602,6 +646,7 @@
         }
         finish(resp.data.raw_value || '');
         row.dataset.group = resp.data.raw_value || '';
+        paintGroupTag(row);
         renderChips();
         applyFilter();
         showStatus('✓ 已保存', 'success');

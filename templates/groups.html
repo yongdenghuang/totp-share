@@ -19,13 +19,13 @@
            placeholder="例如：plus、pro20x、plus代充">
     <button class="btn btn-primary text-nowrap">新建</button>
   </form>
-  <div class="form-text">建好后，在添加或编辑账号时就能从下拉框里选它；账号列表里也可以直接点「分组」单元格改。</div>
+  <div class="form-text">新分组会自动分到一个没用过的标签颜色，可以在下面改。建好后，在添加或编辑账号时就能从下拉框里选它；账号列表里也可以直接点「分组」单元格改。</div>
 </div>
 
 <div class="card">
  <div class="table-responsive"><table class="table mb-0 align-middle">
   <thead class="table-light">
-    <tr><th>分组名称</th><th style="width:110px">账号数</th><th style="width:90px"></th></tr>
+    <tr><th>标签颜色与名称</th><th style="width:110px">账号数</th><th style="width:90px"></th></tr>
   </thead>
   <tbody>
   {% for g in groups %}
@@ -35,9 +35,11 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="action" value="rename">
           <input type="hidden" name="old_name" value="{{ g.name }}">
+          <input type="color" class="form-control form-control-sm form-control-color" name="color"
+                 value="{{ g.color }}" title="标签颜色" aria-label="标签颜色">
           <input class="form-control form-control-sm" name="name" value="{{ g.name }}" maxlength="30" required
                  aria-label="分组名称">
-          <button class="btn btn-sm btn-outline-secondary text-nowrap">改名</button>
+          <button class="btn btn-sm btn-outline-secondary text-nowrap">保存</button>
         </form>
       </td>
       <td>{{ g.count }} 个</td>

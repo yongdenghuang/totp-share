@@ -147,6 +147,57 @@ def test_group_management(ctx):
     assert [r["name"] for r in ctx.sql("SELECT name FROM account_groups")] == ["pro20x"]
 
 
+def test_groups_get_distinct_colors_and_color_is_editable(ctx):
+    from migrate import GROUP_PALETTE
+    c = ctx.admin()
+    names = [f"g{i}" for i in range(len(GROUP_PALETTE) + 2)]
+    for n in names:
+        add_group(c, n)
+    colors = [r["color"] for r in ctx.sql("SELECT color FROM account_groups ORDER BY id")]
+    assert colors[:len(GROUP_PALETTE)] == GROUP_PALETTE          # 调色板范围内互不重复
+    assert all(col in GROUP_PALETTE for col in colors)            # 用完后循环取，不会没有颜色
+
+    # 删掉一个分组后，新建的分组复用空出来的那个颜色，而不是和别人撞色
+    post(c, "/admin/groups", data={"action": "delete", "old_name": "g1"})
+    add_group(c, "fresh")
+    assert ctx.sql("SELECT color FROM account_groups WHERE name='fresh'")[0]["color"] == GROUP_PALETTE[1]
+
+    # 手动改颜色（名字不变）
+    r = post(c, "/admin/groups", data={"action": "rename", "old_name": "g0", "name": "g0", "color": "#ABCDEF"})
+    assert "已保存「g0」" in r.get_data(as_text=True)
+    assert ctx.sql("SELECT color FROM account_groups WHERE name='g0'")[0]["color"] == "#abcdef"
+    # 非法颜色值被拒绝（颜色会写进 style 属性，不能放过任意字符串）
+    for bad in ("red", "#12345", "#abcdef;background:url(x)", "javascript:alert(1)"):
+        r = post(c, "/admin/groups", data={"action": "rename", "old_name": "g0", "name": "g0", "color": bad})
+        assert "颜色格式不正确" in r.get_data(as_text=True)
+    assert ctx.sql("SELECT color FROM account_groups WHERE name='g0'")[0]["color"] == "#abcdef"
+
+
+def test_dashboard_shows_colored_group_tag_before_name(ctx):
+    c = ctx.admin()
+    add_group(c, "plus")
+    post(c, "/admin/accounts/1/field", json={"field": "group_name", "value": "plus"})
+    post(c, "/admin/groups", data={"action": "rename", "old_name": "plus", "name": "plus", "color": "#ffee00"})
+    html = get(c, "/admin/dashboard").get_data(as_text=True)
+    # 亮黄底配深色字；标签紧挨在名称前面
+    assert 'style="background:#ffee00;color:#1f2937">plus</span><strong>plus-01</strong>' in html
+    # 没分组的账号：标签占位但隐藏
+    assert 'js-group-tag d-none"' in html
+    # 倒计时在「验证码」表头里
+    head = html[html.index("<thead"):html.index("</thead>")]
+    assert "验证码" in head and "js-timer-bar" in head and "js-timer-text" in head
+
+
+def test_migration_backfills_colors_for_existing_groups(ctx):
+    import sqlite3
+    from migrate import ensure_schema, GROUP_PALETTE
+    ctx.sql("INSERT INTO account_groups(name, color) VALUES ('old-a', NULL), ('old-b', NULL)")
+    db = sqlite3.connect(ctx.path)
+    ensure_schema(db)
+    db.close()
+    assert [r["color"] for r in ctx.sql("SELECT color FROM account_groups ORDER BY id")] == GROUP_PALETTE[:2]
+
+
 def test_group_inline_edit_and_field_whitelist(ctx):
     c = ctx.admin()
     add_group(c, "plus")
