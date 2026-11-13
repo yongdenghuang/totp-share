@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}TOTP 分享{% endblock %}</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+ body{background:#f5f7fb;}
+ .card{border:none;box-shadow:0 2px 12px rgba(0,0,0,.06);border-radius:12px;}
+ .navbar-brand{font-weight:600}
+ .token-badge{font-family:ui-monospace,Menlo,monospace;font-size:.85rem;color:#6c757d;word-break:break-all}
+ .code-box{font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:3rem;letter-spacing:.5rem;
+           color:#0d6efd;text-align:center;padding:1rem 0;}
+ .ring{--p:100;--c:#0d6efd;width:64px;height:64px;border-radius:50%;
+       background:conic-gradient(var(--c) calc(var(--p)*1%),#e9ecef 0);
+       display:grid;place-items:center;margin:1rem auto;transition:background .5s linear;}
+ .ring>div{width:54px;height:54px;background:#fff;border-radius:50%;
+           display:grid;place-items:center;font-weight:600;color:#0d6efd;}
+</style>
+</head>
+<body>
+{% if session.admin_id %}
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
+ <div class="container">
+  <a class="navbar-brand" href="{{ url_for('dashboard') }}">🔐 TOTP 分享管理</a>
+  <div class="d-flex align-items-center">
+   <a class="btn btn-sm btn-light me-2" href="{{ url_for('settings') }}">设置</a>
+   <form method="post" action="{{ url_for('logout') }}" class="d-inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-sm btn-outline-light">登出</button>
+   </form>
+  </div>
+ </div>
+</nav>
+{% endif %}
+<main class="container pb-5">
+ {% with ms = get_flashed_messages(with_categories=true) %}
+   {% for cat,m in ms %}<div class="alert alert-{{ 'success' if cat=='success' else 'warning' }} alert-dismissible">{{ m }}<button class="btn-close" data-bs-dismiss="alert"></button></div>{% endfor %}
+ {% endwith %}
+ {% block content %}{% endblock %}
+</main>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

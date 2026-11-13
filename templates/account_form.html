@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}{{ '添加' if mode=='new' else '编辑' }}账号{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-lg-8">
+ {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+
+ <form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="card p-4 mb-3">
+    <h5 class="mb-3">{{ '添加新账号' if mode=='new' else '编辑账号' }}</h5>
+
+    <div class="mb-3">
+      <label class="form-label">账号名称 <span class="text-danger">*</span></label>
+      <input class="form-control" name="name" value="{{ account.name or '' }}" required maxlength="100">
+      <div class="form-text">例如：主邮箱、银行APP、公司OA等</div>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">TOTP 密钥（Base32）{% if mode=='new' %} <span class="text-danger">*</span>{% endif %}</label>
+      <input class="form-control font-monospace" name="secret" value="{{ account.secret or '' }}"
+             placeholder="JBSWY3DPEHPK3PXP" {% if mode=='new' %}required{% endif %}>
+      <div class="form-text">
+        从 Authenticator App 或原始二维码中获取。A-Z 与 2-7 字符组成，长度 16+。
+        {% if mode=='edit' %}留空表示不修改密钥。{% endif %}
+      </div>
+    </div>
+
+    {% if mode=='edit' %}
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" id="regen" name="regen_url" value="1">
+      <label class="form-check-label" for="regen">重新生成分享链接（旧链接立即失效）</label>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card p-4 mb-3">
+    <h6 class="mb-1">合租与续费信息</h6>
+    <p class="text-muted small mb-3">可选，留空不影响现有功能。续费相关 4 个字段（周期/日期/金额/币种）需一起填写才显示"剩余价值"。</p>
+
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label">合租人数</label>
+        <input type="number" class="form-control" name="share_count"
+               min="1" max="99" placeholder="1-99"
+               value="{{ account.share_count if account.share_count else '' }}">
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">续费周期</label>
+        <select class="form-select" name="renewal_period">
+          <option value="">— 不选 —</option>
+          {% for v, label in periods %}
+            <option value="{{ v }}"
+              {% if account.renewal_period and account.renewal_period|int == v %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">续费日期</label>
+        <input type="date" class="form-control" name="renewal_date"
+               value="{{ account.renewal_date or '' }}">
+        <div class="form-text">本次续费当天</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">续费金额</label>
+        <input type="number" class="form-control" name="renewal_amount"
+               min="0" step="0.01" placeholder="128.50"
+               value="{{ account.renewal_amount or '' }}">
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">币种</label>
+        <select class="form-select" name="currency">
+          <option value="">— 不选 —</option>
+          {% for code, label in currencies %}
+            <option value="{{ code }}" {% if account.currency == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">充值渠道</label>
+        <input class="form-control" name="recharge_channel" maxlength="50"
+               placeholder="例如：支付宝、PayPal"
+               value="{{ account.recharge_channel or '' }}">
+        <div class="form-text">最多 50 字</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary">保存</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('dashboard') }}">取消</a>
+  </div>
+ </form>
+</div></div>
+{% endblock %}

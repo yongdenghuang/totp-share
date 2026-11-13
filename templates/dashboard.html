@@ -1,0 +1,688 @@
+{% extends "base.html" %}
+{% block title %}账号列表{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+ <h4 class="mb-0">TOTP 账号管理</h4>
+ <div class="d-flex gap-2">
+   <button type="button" class="btn btn-outline-secondary btn-sm" id="btnResetSort" title="取消当前排序，恢复拖拽保存的顺序">↺ 恢复默认顺序</button>
+   <a class="btn btn-primary btn-sm" href="{{ url_for('account_new') }}">+ 添加账号</a>
+ </div>
+</div>
+
+{# ===== 续费提醒横幅 ===== #}
+{% if expired or due_soon %}
+<div class="alert alert-danger border-danger mb-3">
+  <div class="d-flex align-items-start">
+    <div class="me-2" style="font-size:1.5em; line-height:1">🔔</div>
+    <div class="flex-grow-1">
+      <strong>续费提醒</strong>
+      {% if expired %}
+      <div class="mt-2">
+        <span class="badge bg-danger me-1">已过期 {{ expired|length }} 个</span>
+        {% for a in expired %}
+          <span class="badge bg-light text-danger border border-danger me-1 mb-1">
+            {{ a.name }} <small>(逾期 {{ -a._days_left }} 天)</small>
+          </span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if due_soon %}
+      <div class="mt-2">
+        <span class="badge bg-warning text-dark me-1">7 天内到期 {{ due_soon|length }} 个</span>
+        {% for a in due_soon %}
+          <span class="badge bg-light text-warning-emphasis border border-warning me-1 mb-1">
+            {{ a.name }} <small>(还剩 {{ a._days_left }} 天)</small>
+          </span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ===== 蓝色统计卡片 ===== #}
+<div class="card stats-card border-0 text-white mb-3" style="background:linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%)">
+  <div class="card-body py-3">
+    <div class="row g-3 text-center">
+      <div class="col-6 col-md">
+        <div class="stat-label">账号总数</div>
+        <div class="stat-value">{{ stats.account_count }}<small class="ms-1">个</small></div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="stat-label">合租总人数</div>
+        <div class="stat-value">{{ stats.total_share }}<small class="ms-1">人</small></div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="stat-label">合计租金收入 <small class="opacity-75">(¥{{ stats.price_per_person }}/人)</small></div>
+        <div class="stat-value">¥{{ stats.total_rent }}</div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="stat-label">合计续费成本</div>
+        <div class="stat-value">¥{{ stats.total_cost }}</div>
+      </div>
+      <div class="col-12 col-md">
+        <div class="stat-label">预估毛利</div>
+        <div class="stat-value {% if stats.profit < 0 %}text-warning{% endif %}">
+          ¥{{ stats.profit }}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if share_pw_enabled %}
+<div class="alert alert-info py-2">🔒 分享页面密码保护已开启</div>
+{% endif %}
+
+<div class="alert alert-light border small py-2 mb-3">
+  💡 <strong>使用提示</strong>：
+  拖动左侧 <span class="drag-handle-inline">⋮⋮</span> 排序 /
+  点击表头按列排序 /
+  <strong>点击单元格直接编辑</strong>
+  （续费日期输入 <code>月-日</code>，如 <code>05-20</code>）
+  <span id="saveStatus" class="ms-2"></span>
+</div>
+
+<div class="card">
+ <div class="table-responsive"><table class="table table-hover mb-0 align-middle table-sortable" id="accountsTable">
+  <thead class="table-light">
+    <tr>
+      <th data-sort-type="none" style="width:36px" title="拖拽排序"></th>
+      <th data-sort-type="string">名称</th>
+      <th data-sort-type="none">分享链接</th>
+      <th data-sort-type="number" class="editable-col">合租人数</th>
+      <th data-sort-type="date"   class="editable-col">续费日期</th>
+      <th data-sort-type="number" class="editable-col">续费金额</th>
+      <th data-sort-type="string" class="editable-col">充值渠道</th>
+      <th data-sort-type="date">创建时间</th>
+      <th data-sort-type="none" style="min-width:220px">操作</th>
+    </tr>
+  </thead>
+  <tbody id="accountsBody">
+  {% for a in accounts %}
+   <tr data-id="{{ a.id }}" data-created="{{ a.created_at }}">
+    <td class="drag-handle text-center" data-label="" title="按住拖动">⋮⋮</td>
+    <td data-label="名称"><strong>{{ a.name }}</strong></td>
+    <td data-label="链接">
+     <div class="d-flex align-items-center">
+      <code class="token-badge me-2">{{ base_url }}/t/{{ a.url_token }}</code>
+      <button class="btn btn-sm btn-outline-secondary" onclick="copyText(this,'{{ base_url }}/t/{{ a.url_token }}')">复制</button>
+     </div>
+    </td>
+
+    <td class="editable"
+        data-label="人数" data-field="share_count"
+        data-type="number"
+        data-raw="{{ a.share_count if a.share_count else '' }}"
+        data-sort-value="{{ a.share_count if a.share_count else '' }}">
+      {% if a.share_count %}{{ a.share_count }} 人{% else %}<span class="text-muted">-</span>{% endif %}
+    </td>
+
+    <td class="editable{% if a._days_left is defined and a._days_left < 0 %} date-expired{% elif a._days_left is defined and a._days_left <= 7 %} date-due-soon{% endif %}"
+        data-label="日期" data-field="renewal_date"
+        data-type="date-mmdd"
+        data-raw="{{ a.renewal_date or '' }}"
+        data-sort-value="{{ a.renewal_date or '' }}">
+      {% if a.renewal_date %}{{ a.renewal_date[5:] }}{% else %}-{% endif %}
+    </td>
+
+    <td class="editable"
+        data-label="金额" data-field="renewal_amount"
+        data-type="number-decimal"
+        data-raw="{{ a.renewal_amount or '' }}"
+        data-sort-value="{{ a.renewal_amount or '' }}">
+      {% if a.renewal_amount %}
+        ¥{{ a.renewal_amount|float|int }}
+      {% else %}<span class="text-muted">-</span>{% endif %}
+    </td>
+
+    <td class="editable"
+        data-label="渠道" data-field="recharge_channel"
+        data-type="text"
+        data-raw="{{ a.recharge_channel or '' }}"
+        data-sort-value="{{ a.recharge_channel or '' }}">
+      {{ a.recharge_channel or '-' }}
+    </td>
+
+    <td class="text-muted small" data-label="创建">{{ a.created_at }}</td>
+    <td data-label="操作">
+     <a class="btn btn-sm btn-outline-primary" href="/t/{{ a.url_token }}" target="_blank">预览</a>
+     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('account_edit', aid=a.id) }}">编辑</a>
+     <form method="post" action="{{ url_for('account_delete', aid=a.id) }}" class="d-inline" onsubmit="return confirm('确定删除 {{ a.name }}？')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-sm btn-outline-danger">删除</button>
+     </form>
+    </td>
+   </tr>
+  {% else %}<tr><td colspan="9" class="text-center text-muted py-5">还没有账号，点右上角"+ 添加账号"开始。</td></tr>
+  {% endfor %}
+  </tbody></table></div>
+</div>
+
+<style>
+  .stats-card .stat-label {
+    font-size: 0.8rem; opacity: 0.85; margin-bottom: 4px;
+  }
+  .stats-card .stat-value {
+    font-size: 1.5rem; font-weight: 700; line-height: 1.1;
+  }
+  .stats-card .stat-value small { font-size: 0.6em; font-weight: 400; opacity: 0.85; }
+
+  .table-sortable th[data-sort-type]:not([data-sort-type="none"]) {
+    cursor: pointer; user-select: none; position: relative; padding-right: 1.4em;
+    white-space: nowrap;
+  }
+  .table-sortable th[data-sort-type]:not([data-sort-type="none"])::after {
+    content: "↕"; position: absolute; right: 0.4em; opacity: 0.35; font-size: 0.85em;
+  }
+  .table-sortable th[aria-sort="ascending"]::after  { content: "↑"; opacity: 1; }
+  .table-sortable th[aria-sort="descending"]::after { content: "↓"; opacity: 1; }
+  .table-sortable th.editable-col { background: #fffdf5; }
+
+  .drag-handle {
+    cursor: grab; color: #adb5bd; font-weight: bold; font-size: 1.2rem;
+    user-select: none; letter-spacing: -2px; padding-left: 8px; padding-right: 8px;
+  }
+  .drag-handle:hover { color: #0d6efd; }
+  .drag-handle:active { cursor: grabbing; }
+  .drag-handle-inline {
+    display: inline-block; color: #6c757d; font-weight: bold;
+    letter-spacing: -2px; padding: 0 2px;
+  }
+
+  tr.sortable-ghost { opacity: 0.4; background: #e7f1ff; }
+  tr.sortable-chosen { background: #fff3cd; }
+  tr.sortable-drag { background: #fff; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
+
+  table.sort-active .drag-handle { cursor: not-allowed; opacity: 0.3; }
+
+  td.editable { cursor: text; position: relative; transition: background .15s; }
+  td.editable:hover { background: #f8f9fa; }
+  td.editable:hover::after {
+    content: "✎"; position: absolute; right: 6px; top: 50%;
+    transform: translateY(-50%); opacity: 0.4; font-size: 0.85em;
+    pointer-events: none;
+  }
+  td.editable.editing { padding: 2px 4px !important; background: #fff3cd; }
+  td.editable.editing::after { display: none; }
+  td.editable input.inline-input {
+    width: 100%; padding: 4px 6px; border: 1px solid #0d6efd;
+    border-radius: 3px; font-size: 0.95em; outline: none;
+    box-shadow: 0 0 0 2px rgba(13,110,253,.15);
+  }
+  td.editable.saving { background: #d1e7dd; }
+  td.editable.error { background: #f8d7da; }
+
+  #saveStatus { font-size: 0.9em; }
+  #saveStatus.success { color: #198754; }
+  #saveStatus.error { color: #dc3545; }
+
+  td.editable.date-due-soon {
+    background-color: #fff3cd !important; color: #664d03; font-weight: 600;
+  }
+  td.editable.date-due-soon:hover { background-color: #ffe8a1 !important; }
+  td.editable.date-expired {
+    background-color: #f8d7da !important; color: #842029; font-weight: 700;
+  }
+  td.editable.date-expired:hover { background-color: #f1b0b7 !important; }
+
+  /* ======== 手机端响应式（< 768px）======== */
+  @media (max-width: 767.98px) {
+    /* 统计卡：5 列变成更紧凑的网格 */
+    .stats-card .stat-label {
+      font-size: 0.7rem;
+    }
+    .stats-card .stat-value {
+      font-size: 1.1rem;
+    }
+    .stats-card .card-body { padding: 0.75rem 0.5rem; }
+
+    /* 续费提醒：紧凑 */
+    .alert { padding: 0.6rem 0.75rem; font-size: 0.85rem; }
+    .alert .badge { font-size: 0.7rem; }
+
+    /* 使用提示：隐藏详细文字，避免占空间 */
+    .alert-light small, .alert-light code { display: none; }
+
+    /* 让链接/按钮更易点 */
+    .table-responsive .btn-sm { padding: 0.3rem 0.5rem; }
+
+    /* ★ 核心：把 table 变身卡片视图 ★ */
+    #accountsTable thead { display: none; }  /* 表头隐藏 */
+    #accountsTable,
+    #accountsTable tbody,
+    #accountsTable tr,
+    #accountsTable td { display: block; width: 100%; }
+
+    #accountsTable tr {
+      background: #fff;
+      border: 1px solid #e4e7ec;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      padding: 10px 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.04);
+      position: relative;
+    }
+
+    #accountsTable td {
+      border: none !important;
+      padding: 4px 0 !important;
+      position: relative;
+      padding-left: 80px !important;  /* 给标签让位 */
+      min-height: 24px;
+      word-break: break-all;
+    }
+    #accountsTable td::before {
+      content: attr(data-label);
+      position: absolute;
+      left: 0; top: 4px;
+      width: 70px;
+      color: #6c757d;
+      font-size: 0.82rem;
+      font-weight: 500;
+    }
+
+    /* 拖拽手柄单独处理：放卡片右上角 */
+    #accountsTable td.drag-handle {
+      position: absolute !important;
+      top: 6px; right: 6px;
+      width: auto !important;
+      padding: 0 !important;
+      padding-left: 0 !important;
+    }
+    #accountsTable td.drag-handle::before { display: none; }
+
+    /* 名称加粗、更显眼 */
+    #accountsTable td[data-label="名称"] {
+      padding-left: 0 !important;
+      font-size: 1rem;
+      border-bottom: 1px solid #f0f2f5 !important;
+      padding-bottom: 8px !important;
+      margin-bottom: 4px;
+      padding-right: 28px;  /* 给右上角手柄让位 */
+    }
+    #accountsTable td[data-label="名称"]::before { display: none; }
+
+    /* 分享链接：让 code 可以换行 */
+    #accountsTable td[data-label="链接"] code {
+      font-size: 0.75rem;
+      display: inline-block;
+      max-width: 100%;
+      white-space: normal;
+      word-break: break-all;
+    }
+
+    /* 操作按钮一行显示，居中 */
+    #accountsTable td[data-label="操作"] {
+      padding-left: 0 !important;
+      border-top: 1px solid #f0f2f5 !important;
+      padding-top: 8px !important;
+      margin-top: 6px;
+      display: flex !important;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    #accountsTable td[data-label="操作"]::before { display: none; }
+
+    /* 创建时间：灰字小号 */
+    #accountsTable td[data-label="创建"] {
+      color: #adb5bd; font-size: 0.75rem;
+    }
+
+    /* 编辑悬停的 ✎ 图标在手机上没意义，隐藏 */
+    td.editable:hover::after { display: none; }
+  }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js"></script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyText(btn,t){
+  navigator.clipboard.writeText(t).then(function(){
+    var o=btn.innerText;btn.innerText='已复制';
+    setTimeout(function(){btn.innerText=o},1200);
+  });
+}
+
+(function(){
+  'use strict';
+  var table  = document.getElementById('accountsTable');
+  var tbody  = document.getElementById('accountsBody');
+  var statusEl = document.getElementById('saveStatus');
+  var btnReset = document.getElementById('btnResetSort');
+  if (!table || !tbody) return;
+
+  var csrfToken = '{{ csrf_token() }}';
+  var defaultOrder = Array.prototype.slice.call(tbody.rows);
+  var statusTimer = null;
+
+  function showStatus(text, kind){
+    if (!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.className = 'ms-2 ' + (kind === 'error' ? 'error' : 'success');
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(function(){
+      statusEl.textContent = ''; statusEl.className = 'ms-2';
+    }, 2500);
+  }
+
+  function isEmpty(v){ return v==null||v===''||v==='-'||/^\s*$/.test(v); }
+  var parsers = {
+    string: function(s){ return isEmpty(s)?null:String(s).trim().toLocaleLowerCase('zh-Hans-CN'); },
+    number: function(s){
+      if(isEmpty(s)) return null;
+      var n = parseFloat(String(s).replace(/[,\s人¥]/g, ''));
+      return isFinite(n)?n:null;
+    },
+    date: function(s){
+      if(isEmpty(s)) return null;
+      var t = Date.parse(String(s).trim());
+      return isNaN(t)?null:t;
+    }
+  };
+  function cellValue(td){
+    var dv = td.getAttribute('data-sort-value');
+    return dv!==null ? dv : (td.textContent || '');
+  }
+  function cmp(a,b,type,dir){
+    var pa = parsers[type] ? parsers[type](a) : parsers.string(a);
+    var pb = parsers[type] ? parsers[type](b) : parsers.string(b);
+    if(pa===null && pb===null) return 0;
+    if(pa===null) return 1;
+    if(pb===null) return -1;
+    if(pa<pb) return dir==='asc'?-1:1;
+    if(pa>pb) return dir==='asc'?1:-1;
+    return 0;
+  }
+  function clearSortArrows(){
+    Array.prototype.forEach.call(table.tHead.rows[0].cells, function(h){
+      if(h.dataset.sortType && h.dataset.sortType!=='none'){
+        h.setAttribute('aria-sort','none');
+      }
+    });
+    table.classList.remove('sort-active');
+  }
+  function applyDefaultOrder(){
+    var frag = document.createDocumentFragment();
+    defaultOrder.forEach(function(r){ frag.appendChild(r); });
+    tbody.appendChild(frag);
+  }
+  var headers = table.tHead.rows[0].cells;
+  Array.prototype.forEach.call(headers, function(th, colIdx){
+    var type = th.dataset.sortType;
+    if(!type || type==='none') return;
+    th.setAttribute('role','button');
+    th.setAttribute('tabindex','0');
+    th.setAttribute('aria-sort','none');
+    var handler = function(){
+      var cur = th.getAttribute('aria-sort');
+      var next = cur==='none' ? 'ascending' : (cur==='ascending' ? 'descending' : 'none');
+      Array.prototype.forEach.call(headers, function(h){
+        if(h!==th && h.dataset.sortType && h.dataset.sortType!=='none'){
+          h.setAttribute('aria-sort','none');
+        }
+      });
+      th.setAttribute('aria-sort', next);
+      if(next==='none'){
+        table.classList.remove('sort-active');
+        applyDefaultOrder();
+      } else {
+        table.classList.add('sort-active');
+        var dir = next==='ascending'?'asc':'desc';
+        var ordered = Array.prototype.slice.call(tbody.rows).sort(function(r1,r2){
+          return cmp(cellValue(r1.cells[colIdx]), cellValue(r2.cells[colIdx]), type, dir);
+        });
+        var frag = document.createDocumentFragment();
+        ordered.forEach(function(r){ frag.appendChild(r); });
+        tbody.appendChild(frag);
+      }
+    };
+    th.addEventListener('click', handler);
+    th.addEventListener('keydown', function(e){
+      if(e.key==='Enter' || e.key===' '){ e.preventDefault(); handler(); }
+    });
+  });
+  if (btnReset) {
+    btnReset.addEventListener('click', function(){
+      clearSortArrows(); applyDefaultOrder();
+      showStatus('已恢复保存的顺序', 'success');
+    });
+  }
+
+  if (typeof Sortable !== 'undefined') {
+    Sortable.create(tbody, {
+      handle: '.drag-handle',
+      animation: 180,
+      ghostClass: 'sortable-ghost',
+      chosenClass: 'sortable-chosen',
+      dragClass: 'sortable-drag',
+      onStart: function(){
+        if (table.classList.contains('sort-active')) clearSortArrows();
+      },
+      onEnd: function(evt){
+        if (evt.oldIndex === evt.newIndex) return;
+        var ids = Array.prototype.slice.call(tbody.rows).map(function(r){
+          return parseInt(r.dataset.id, 10);
+        }).filter(function(n){ return !isNaN(n); });
+        showStatus('保存顺序中...', 'success');
+        fetch('{{ url_for("accounts_reorder") }}', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+          body: JSON.stringify({ order: ids })
+        }).then(function(r){ return r.json(); }).then(function(j){
+          if (j && j.ok) {
+            showStatus('✓ 顺序已保存', 'success');
+            defaultOrder = Array.prototype.slice.call(tbody.rows);
+          } else {
+            showStatus('✗ 保存失败', 'error');
+          }
+        }).catch(function(){ showStatus('✗ 网络错误', 'error'); });
+      }
+    });
+  }
+
+  // ===== 内联编辑（修复 bug 版本）=====
+  var activeEditor = null;
+
+  // 统一释放锁的函数 - 无论任何退出路径都通过它
+  function releaseLock(td) {
+    if (td) {
+      td.classList.remove('editing', 'saving', 'error');
+    }
+    activeEditor = null;
+  }
+
+  function buildInput(type, raw){
+    var el;
+    if (type === 'date-mmdd') {
+      el = document.createElement('input'); el.type = 'text';
+      el.placeholder = '月-日，如 05-20'; el.maxLength = 10;
+      if (raw && raw.length >= 10) {
+        el.value = raw.substring(5);
+      } else {
+        el.value = '';
+      }
+    } else if (type === 'number') {
+      el = document.createElement('input'); el.type = 'number';
+      el.min = '1'; el.max = '99'; el.step = '1'; el.value = raw || '';
+    } else if (type === 'number-decimal') {
+      el = document.createElement('input'); el.type = 'number';
+      el.min = '0'; el.step = '1';
+      el.value = raw ? String(parseInt(parseFloat(raw), 10)) : '';
+    } else {
+      el = document.createElement('input'); el.type = 'text';
+      el.maxLength = 50; el.value = raw || '';
+    }
+    el.className = 'inline-input';
+    return el;
+  }
+
+  function startEdit(td){
+    if (activeEditor) return;
+    if (td.classList.contains('editing')) return;
+
+    var field  = td.dataset.field;
+    var type   = td.dataset.type;
+    var rawVal = td.dataset.raw || '';
+    var originalHTML = td.innerHTML;
+
+    var input = buildInput(type, rawVal);
+    td.innerHTML = '';
+    td.appendChild(input);
+    td.classList.add('editing');
+    activeEditor = { td: td, input: input };
+
+    setTimeout(function(){
+      input.focus();
+      if (input.select) try { input.select(); } catch(e){}
+    }, 0);
+
+    var finished = false;
+
+    function cancel(){
+      if (finished) return;
+      finished = true;
+      td.innerHTML = originalHTML;
+      releaseLock(td);
+    }
+
+    function commit(){
+      if (finished) return;
+      finished = true;
+      var newVal = input.value.trim();
+
+      // 与原值相同 → 直接取消
+      var sameAsOld = false;
+      if (type === 'date-mmdd') {
+        var oldMmDd = (rawVal && rawVal.length >= 10) ? rawVal.substring(5) : '';
+        sameAsOld = (newVal === oldMmDd);
+      } else if (type === 'number-decimal') {
+        var oldInt = rawVal ? String(parseInt(parseFloat(rawVal), 10)) : '';
+        sameAsOld = (newVal === oldInt);
+      } else {
+        sameAsOld = (newVal === rawVal);
+      }
+      if (sameAsOld) {
+        td.innerHTML = originalHTML;
+        releaseLock(td);
+        return;
+      }
+
+      td.classList.remove('editing');
+      td.classList.add('saving');
+      var row = td.closest('tr');
+      var aid = row.dataset.id;
+
+      fetch('/admin/accounts/' + aid + '/field', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ field: field, value: newVal })
+      }).then(function(r){
+        return r.json().then(function(j){ return {status: r.status, data: j}; });
+      }).then(function(resp){
+        if (resp.data && resp.data.ok) {
+          // 成功分支
+          td.dataset.raw = resp.data.raw_value !== undefined ? resp.data.raw_value : newVal;
+          td.dataset.sortValue = resp.data.sort_value || '';
+          var newHTML;
+          if (!newVal || resp.data.display === '-') {
+            newHTML = '<span class="text-muted">-</span>';
+            td.dataset.raw = '';
+          } else if (field === 'renewal_amount') {
+            var num = parseFloat(resp.data.raw_value || newVal);
+            if (isFinite(num)) {
+              newHTML = '¥' + Math.floor(num);
+              td.dataset.sortValue = String(num);
+            } else {
+              newHTML = '<span class="text-muted">-</span>';
+            }
+          } else if (field === 'renewal_date') {
+            var full = resp.data.raw_value || newVal;
+            if (full && full.length >= 10) {
+              newHTML = full.substring(5);
+              td.dataset.sortValue = full;
+            } else {
+              newHTML = '<span class="text-muted">-</span>';
+            }
+          } else {
+            newHTML = resp.data.display;
+          }
+          td.innerHTML = newHTML;
+          releaseLock(td);
+          showStatus('✓ 已保存', 'success');
+          defaultOrder = Array.prototype.slice.call(tbody.rows);
+        } else {
+          // 失败分支：恢复原样，立即释放锁
+          var msg = (resp.data && resp.data.error) ? resp.data.error : ('HTTP ' + resp.status);
+          td.innerHTML = originalHTML;
+          releaseLock(td);
+          showStatus('✗ ' + msg, 'error');
+        }
+      }).catch(function(e){
+        // 网络错误：恢复原样，立即释放锁
+        td.innerHTML = originalHTML;
+        releaseLock(td);
+        showStatus('✗ 网络错误：' + (e.message || ''), 'error');
+      });
+    }
+
+    input.addEventListener('keydown', function(e){
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', function(){
+      setTimeout(function(){ if (!finished) commit(); }, 100);
+    });
+  }
+
+  tbody.addEventListener('click', function(e){
+    var td = e.target.closest('td.editable');
+    if (!td) return;
+    if (td.classList.contains('editing')) return;
+    // 如果有正在编辑的其他单元格，先提交或取消
+    if (activeEditor && activeEditor.td !== td) {
+      // 触发当前编辑框的 blur，其 setTimeout commit 会执行
+      // 然后再启动新的编辑（延时一下）
+      activeEditor.input.blur();
+      setTimeout(function(){
+        if (!activeEditor) startEdit(td);
+      }, 200);
+      return;
+    }
+    startEdit(td);
+  });
+
+  // 全局 Esc 键：如果有卡住的编辑框，强制释放
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && activeEditor) {
+      var td = activeEditor.td;
+      td.innerHTML = td.querySelector('.inline-input') ? td.innerHTML : td.innerHTML;
+      // 读取一份当前 dataset.raw 的状态重新构造展示
+      var rawVal = td.dataset.raw || '';
+      var field = td.dataset.field;
+      var display = '-';
+      if (rawVal) {
+        if (field === 'renewal_amount') {
+          display = '¥' + Math.floor(parseFloat(rawVal));
+        } else if (field === 'renewal_date') {
+          display = rawVal.length >= 10 ? rawVal.substring(5) : rawVal;
+        } else if (field === 'share_count') {
+          display = rawVal + ' 人';
+        } else {
+          display = rawVal;
+        }
+      }
+      if (display === '-') {
+        td.innerHTML = '<span class="text-muted">-</span>';
+      } else {
+        td.textContent = display;
+      }
+      releaseLock(td);
+    }
+  });
+})();
+</script>
+{% endblock %}

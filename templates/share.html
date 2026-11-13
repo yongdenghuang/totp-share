@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} — TOTP 验证码{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-5">
+ <div class="card p-4 text-center">
+  <div class="text-muted small">账号</div>
+  <h4 class="mb-3">{{ name }}</h4>
+  <div class="code-box" id="code">------</div>
+  <div class="ring" id="ring" style="--p:100"><div id="sec">30</div></div>
+  <div class="text-muted small">TOTP 码每 30 秒刷新一次</div>
+ </div>
+</div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+var apiUrl = "/t/{{ token }}/code";
+var codeEl = document.getElementById('code');
+var ringEl = document.getElementById('ring');
+var secEl  = document.getElementById('sec');
+var period = 30, remaining = 30;
+
+function fetchCode(){
+ fetch(apiUrl, {cache:'no-store'}).then(function(r){
+   if(!r.ok) throw new Error('fail');
+   return r.json();
+ }).then(function(j){
+   codeEl.textContent = j.code.replace(/(\d{3})(\d{3})/, '$1 $2');
+   period = j.period; remaining = j.remaining;
+   ringEl.style.setProperty('--c', remaining < 5 ? '#dc3545' : '#0d6efd');
+ }).catch(function(){ codeEl.textContent = '错误'; });
+}
+function tick(){
+ remaining = Math.max(0, remaining - 1);
+ ringEl.style.setProperty('--p', (remaining / period) * 100);
+ secEl.textContent = remaining;
+ if (remaining < 5) ringEl.style.setProperty('--c','#dc3545');
+ if (remaining <= 0) fetchCode();
+}
+fetchCode();
+setInterval(tick, 1000);
+document.addEventListener('visibilitychange', function(){ if(!document.hidden) fetchCode(); });
+</script>
+{% endblock %}

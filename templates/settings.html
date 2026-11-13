@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}设置{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-lg-8">
+{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+{% if msg %}<div class="alert alert-success">{{ msg }}</div>{% endif %}
+
+<div class="card p-4 mb-3">
+ <h5 class="mb-3">分享页面密码保护</h5>
+ <form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="toggle">
+  <div class="form-check form-switch mb-3">
+   <input class="form-check-input" type="checkbox" role="switch" id="enable"
+          name="share_password_enabled" {% if share_pw_enabled %}checked{% endif %}>
+   <label class="form-check-label" for="enable">开启（所有分享链接需输入密码才能查看 TOTP 码）</label>
+  </div>
+  <div class="mb-3"><label class="form-label">密码（留空表示不修改现有密码）</label>
+   <input class="form-control" type="password" name="share_password" minlength="4"></div>
+  <button class="btn btn-primary">保存</button>
+ </form>
+</div>
+
+<div class="card p-4 mb-3">
+ <h5 class="mb-3">修改管理员用户名</h5>
+ <p class="text-muted small">当前用户名：<strong>{{ current_username }}</strong></p>
+ <form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="change_admin_username">
+  <div class="mb-3"><label class="form-label">新用户名</label>
+   <input class="form-control" name="new_username" minlength="2" maxlength="64" required></div>
+  <div class="mb-3"><label class="form-label">当前密码（验证身份）</label>
+   <input class="form-control" type="password" name="username_password" required></div>
+  <button class="btn btn-warning">修改用户名</button>
+ </form>
+</div>
+
+<div class="card p-4">
+ <h5 class="mb-3">修改管理员密码</h5>
+ <form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="change_admin_password">
+  <div class="mb-3"><label class="form-label">当前密码</label>
+   <input class="form-control" type="password" name="old_password" required></div>
+  <div class="mb-3"><label class="form-label">新密码（至少 12 位）</label>
+   <input class="form-control" type="password" name="new_password" minlength="12" required></div>
+  <button class="btn btn-warning">修改密码</button>
+ </form>
+</div>
+</div></div>
+{% endblock %}
