@@ -26,7 +26,7 @@
   </div>
 </div>
 <div class="small text-muted mb-3">
-  点验证码复制 · 点分组单元格直接换组 · 拖 <span class="drag-handle-inline">⋮⋮</span> 排序 · 点表头按列排序
+  点验证码复制 ·「复制信息」一键复制账号、密码和验证码链接 · 点分组单元格直接换组 · 拖 <span class="drag-handle-inline">⋮⋮</span> 排序 · 点表头按列排序
   <span id="saveStatus" class="ms-2"></span>
 </div>
 
@@ -70,7 +70,7 @@
 
     <td data-label="链接">
      <div class="d-flex align-items-center flex-nowrap gap-1">
-      <code class="token-badge me-1 js-link-text d-none d-xl-inline text-nowrap" title="{{ base_url }}/t/{{ a.url_token }}">/t/{{ a.url_token }}</code>
+      <code class="token-badge me-1 js-link-text d-none d-xxl-inline text-nowrap" title="{{ base_url }}/t/{{ a.url_token }}">/t/{{ a.url_token }}</code>
       {% if a.has_own_password %}<span title="此链接设有单独密码">🔒</span>{% endif %}
       <button type="button" class="btn btn-sm btn-outline-secondary js-copy-link">复制</button>
       <button type="button" class="btn btn-sm btn-outline-warning js-regen" title="生成新链接，旧链接立即失效">换链接</button>
@@ -82,6 +82,8 @@
     </td>
 
     <td data-label="操作" class="text-nowrap">
+     <button type="button" class="btn btn-sm btn-primary js-copy-info"
+             title="复制分组、账号、密码和验证码链接{% if not a.has_password %}（此账号还没保存密码）{% endif %}">复制信息</button>
      <a class="btn btn-sm btn-outline-primary js-preview" href="/t/{{ a.url_token }}" target="_blank">预览</a>
      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('access_logs', account=a.id) }}">记录</a>
      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('account_edit', aid=a.id) }}">编辑</a>
@@ -272,6 +274,20 @@
     return Promise.reject(new Error('浏览器不支持自动复制'));
   }
 
+  // 要复制的内容得先向服务器取时用这个：Safari 只允许在点击的那一刻发起复制，
+  // 所以把"还没取回来的内容"以 Promise 形式直接交给剪贴板；不支持这种写法的浏览器退回到取完再复制。
+  function copyWhenReady(textPromise){
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+      try {
+        var item = new ClipboardItem({ 'text/plain': textPromise.then(function(t){
+          return new Blob([t], { type: 'text/plain' });
+        }) });
+        return navigator.clipboard.write([item]);
+      } catch (e) { /* 旧浏览器的 ClipboardItem 不收 Promise，走下面 */ }
+    }
+    return textPromise.then(copyToClipboard);
+  }
+
   // ===== 实时验证码 =====
   var codeUrl = '{{ url_for("admin_codes") }}';
   var timerBars = document.querySelectorAll('.js-timer-bar');     // 表头一份，手机端筛选条一份
@@ -362,6 +378,28 @@
           if (codeBtn.dataset.code) codeBtn.textContent = formatCode(codeBtn.dataset.code);
         }, 1000);
       }).catch(function(err){ showStatus('✗ 复制失败：' + err.message, 'error'); });
+      return;
+    }
+
+    var infoBtn = e.target.closest('.js-copy-info');
+    if (infoBtn) {
+      var hasPassword = true;
+      var text = postJSON('/admin/accounts/' + row.dataset.id + '/share-text').then(function(resp){
+        if (!(resp.data && resp.data.ok)) {
+          throw new Error((resp.data && resp.data.error) || ('HTTP ' + resp.status));
+        }
+        hasPassword = resp.data.has_password;
+        return resp.data.text;
+      });
+      infoBtn.disabled = true;
+      copyWhenReady(text).then(function(){
+        var old = infoBtn.textContent; infoBtn.textContent = '已复制';
+        setTimeout(function(){ infoBtn.textContent = old; }, 1200);
+        if (hasPassword) showStatus('✓ 已复制「' + row.dataset.name + '」的账号信息', 'success');
+        else showStatus('已复制，但这个账号还没保存密码（在「编辑」里填）', 'error');
+      }).catch(function(err){
+        showStatus('✗ 复制失败：' + (err && err.message ? err.message : '浏览器拒绝了复制'), 'error');
+      }).then(function(){ infoBtn.disabled = false; });
       return;
     }
 

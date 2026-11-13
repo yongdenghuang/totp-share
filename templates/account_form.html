@@ -32,6 +32,18 @@
       <div class="form-text">可选。已有分组可在 <a href="{{ url_for('groups_page') }}">分组管理</a> 里改名或删除。</div>
     </div>
 
+    <div class="mb-3">
+      <label class="form-label" for="account_password">账号密码</label>
+      <input class="form-control font-monospace" id="account_password" name="account_password"
+             value="{{ account.account_password or '' }}" maxlength="200"
+             autocomplete="off" autocapitalize="off" spellcheck="false"
+             placeholder="这个账号本身的登录密码">
+      <div class="form-text">
+        可选。加密保存，只用于列表页的「复制信息」——一键复制分组、账号、密码和验证码链接，直接发给合租人。
+        {% if mode=='edit' %}清空后保存即删除。{% endif %}
+      </div>
+    </div>
+
     <div class="mb-0">
       <label class="form-label" for="secret">TOTP 密钥（Base32）{% if mode=='new' %} <span class="text-danger">*</span>{% endif %}</label>
       <input class="form-control font-monospace" id="secret" name="secret" value="{{ account.secret or '' }}"

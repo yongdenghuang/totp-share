@@ -16,6 +16,7 @@ ACCOUNT_COLUMNS = [
     ("sort_order", "INTEGER"),         # 拖拽排序（v2 线上是手工 ALTER 加的）
     ("group_name", "TEXT"),            # 分组；NULL = 未分组
     ("share_password_hash", "TEXT"),   # 此链接的单独密码；NULL = 跟随统一设置
+    ("password_encrypted", "BLOB"),    # 账号本身的登录密码（Fernet 加密）；NULL = 没存
 ]
 
 # 分组标签的默认配色：新建分组时按顺序取第一个还没被用过的颜色。

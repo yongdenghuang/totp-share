@@ -368,3 +368,72 @@ def test_new_account_with_group_and_password(ctx):
     row = ctx.sql("SELECT group_name, share_password_hash, url_token FROM accounts WHERE name='plus代充-01'")[0]
     assert row["group_name"] == "plus代充" and row["share_password_hash"].startswith("$argon2")
     assert get(ctx.client(), f"/t/{row['url_token']}/code").status_code == 403
+
+
+# ---------- 账号密码与「复制信息」 ----------
+def test_account_password_is_encrypted_and_share_text_matches_template(ctx):
+    c = ctx.admin()
+    add_group(c, "Pro20x")
+    post(c, "/admin/accounts/new", data={"name": "user@example.com", "secret": pyotp.random_base32(),
+                                         "group_name": "Pro20x", "account_password": "  Fake-Pass-123  "})
+    row = ctx.sql("SELECT id, url_token, password_encrypted FROM accounts WHERE name='user@example.com'")[0]
+    assert row["password_encrypted"] and b"Fake-Pass-123" not in bytes(row["password_encrypted"])   # 库里是密文
+
+    r = post(c, f"/admin/accounts/{row['id']}/share-text", json={})
+    assert r.status_code == 200 and "no-store" in r.headers["Cache-Control"]
+    body = r.get_json()
+    assert body["has_password"] is True
+    assert body["text"] == ("Pro20x账号密码\n"
+                            "帐户：user@example.com\n"
+                            "密码：Fake-Pass-123\n"
+                            f"验证码获取链接：{BASE_URL}/t/{row['url_token']}")
+
+    # 列表页的 HTML 和分享页都不带密码明文
+    assert "Fake-Pass-123" not in get(c, "/admin/dashboard").get_data(as_text=True)
+    assert "Fake-Pass-123" not in get(ctx.client(), f"/t/{row['url_token']}").get_data(as_text=True)
+    # 编辑页带出已保存的密码，方便查看和修改
+    assert 'value="Fake-Pass-123"' in get(c, f"/admin/accounts/{row['id']}/edit").get_data(as_text=True)
+
+
+def test_share_text_requires_login_and_handles_missing_password(ctx):
+    assert post(ctx.client(), "/admin/accounts/1/share-text", json={}).status_code == 401
+    c = ctx.admin()
+    assert post(c, "/admin/accounts/9999/share-text", json={}).status_code == 404
+    token = ctx.sql("SELECT url_token FROM accounts WHERE id=1")[0]["url_token"]
+    body = post(c, "/admin/accounts/1/share-text", json={}).get_json()
+    # 没分组、没密码：标题行不带分组名，密码那一行整行去掉
+    assert body["has_password"] is False
+    assert body["text"] == f"账号密码\n帐户：plus-01\n验证码获取链接：{BASE_URL}/t/{token}"
+
+
+def test_account_password_edit_and_clear(ctx):
+    c = ctx.admin()
+    post(c, "/admin/accounts/1/edit", data={"name": "plus-01", "account_password": "first-pass"})
+    assert "first-pass" in post(c, "/admin/accounts/1/share-text", json={}).get_json()["text"]
+    post(c, "/admin/accounts/1/edit", data={"name": "plus-01", "account_password": "second-pass"})
+    text = post(c, "/admin/accounts/1/share-text", json={}).get_json()["text"]
+    assert "second-pass" in text and "first-pass" not in text
+    # 清空后保存 = 删除
+    post(c, "/admin/accounts/1/edit", data={"name": "plus-01", "account_password": ""})
+    assert ctx.sql("SELECT password_encrypted FROM accounts WHERE id=1")[0]["password_encrypted"] is None
+    # 太长的密码被拒绝，原值不变
+    post(c, "/admin/accounts/1/edit", data={"name": "plus-01", "account_password": "ok-pass"})
+    r = post(c, "/admin/accounts/1/edit", data={"name": "plus-01", "account_password": "x" * 201})
+    assert r.status_code == 200 and "最长" in r.get_data(as_text=True)
+    assert "ok-pass" in post(c, "/admin/accounts/1/share-text", json={}).get_json()["text"]
+
+
+def test_custom_share_template(ctx):
+    c = ctx.admin()
+    post(c, "/admin/accounts/1/edit", data={"name": "plus-01", "account_password": "p@ss{链接}"})
+    tpl = "【{分组}】{账号} / {密码}\r\n取码：{链接}\r\n请勿修改密码"
+    r = post(c, "/admin/settings", data={"action": "share_template", "share_template": tpl})
+    assert "分享信息模板已保存" in r.get_data(as_text=True)
+    token = ctx.sql("SELECT url_token FROM accounts WHERE id=1")[0]["url_token"]
+    text = post(c, "/admin/accounts/1/share-text", json={}).get_json()["text"]
+    assert text.split("\n")[1:] == [f"取码：{BASE_URL}/t/{token}", "请勿修改密码"]
+    assert text.split("\n")[0] == "【】plus-01 / p@ss{链接}"   # 密码里的占位符字样原样保留，不被二次替换
+    # 清空 = 恢复默认
+    r = post(c, "/admin/settings", data={"action": "share_template", "share_template": ""})
+    assert "已恢复默认" in r.get_data(as_text=True)
+    assert post(c, "/admin/accounts/1/share-text", json={}).get_json()["text"].startswith("账号密码\n帐户：plus-01")

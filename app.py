@@ -139,6 +139,47 @@ def set_setting(key, value):
     execute("INSERT INTO settings(key,value) VALUES(?,?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
 
+# ---------- 账号密码与分享信息 ----------
+MAX_ACCOUNT_PASSWORD = 200
+MAX_TEMPLATE_LENGTH = 1000
+# 「复制信息」生成的文字。占位符：{分组} {账号} {密码} {链接}
+DEFAULT_SHARE_TEMPLATE = (
+    "{分组}账号密码\n"
+    "帐户：{账号}\n"
+    "密码：{密码}\n"
+    "验证码获取链接：{链接}"
+)
+
+def parse_account_password(raw):
+    """账号本身的登录密码。留空 = 不保存（返回 None）；否则返回加密后的密文。"""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    if len(s) > MAX_ACCOUNT_PASSWORD:
+        raise ValueError(f"账号密码最长 {MAX_ACCOUNT_PASSWORD} 个字符")
+    return encrypt_secret(s)
+
+def decrypt_account_password(enc):
+    if not enc:
+        return ""
+    try:
+        return decrypt_secret(enc)
+    except InvalidToken:
+        return ""
+
+def render_share_text(template, group, name, password, url):
+    """把模板里的占位符换成账号信息。
+    账号没存密码时，整行去掉带 {密码} 的那一行，免得发出去一行空的"密码："。
+    """
+    values = {"分组": group or "", "账号": name, "密码": password or "", "链接": url}
+    lines = []
+    for line in template.replace("\r\n", "\n").split("\n"):
+        if "{密码}" in line and not password:
+            continue
+        # 一次扫描完成全部替换：密码或账号名里碰巧有 {链接} 这样的字样时不会被二次替换
+        lines.append(re.sub(r"\{(分组|账号|密码|链接)\}", lambda m: values[m.group(1)], line))
+    return "\n".join(lines).strip()
+
 # ---------- 重名检查 ----------
 def norm_name(s):
     """比较名称时忽略大小写和多余空白。"""
@@ -252,7 +293,7 @@ def set_security_headers(resp):
         "frame-ancestors 'none'; "
         "base-uri 'self'"
     )
-    if request.path.startswith("/t/") or request.path == "/admin/codes":
+    if request.path.startswith("/t/") or request.path.startswith("/admin"):
         resp.headers["Cache-Control"] = "no-store, private, max-age=0"
     return resp
 
@@ -320,6 +361,7 @@ def logout():
 @login_required
 def dashboard():
     rows = query_all("""SELECT id, name, url_token, created_at, group_name,
+                               password_encrypted IS NOT NULL AS has_password,
                                share_password_hash IS NOT NULL AS has_own_password
                         FROM accounts ORDER BY COALESCE(sort_order, 999999), created_at DESC""")
     last_seen = {r["account_id"]: r["seen"] for r in query_all(
@@ -332,6 +374,7 @@ def dashboard():
         "created_at": r["created_at"],
         "group_name": r["group_name"] or "",
         "has_own_password": bool(r["has_own_password"]),
+        "has_password": bool(r["has_password"]),
         "is_duplicate": name_counts[norm_name(r["name"])] > 1,
         "last_seen": last_seen.get(r["id"]),
     } for r in rows]
@@ -451,13 +494,14 @@ def account_new():
     error = None
     dup_warning = None
     form_data = {"name": "", "secret": "", "group_name": "", "new_group": "",
-                 "link_password": ""}
+                 "link_password": "", "account_password": ""}
     if request.method == "POST":
         form_data["name"] = request.form.get("name", "").strip()[:100]
         form_data["secret"] = request.form.get("secret", "").strip()
         form_data["group_name"] = request.form.get("group_name", "").strip()
         form_data["new_group"] = request.form.get("new_group", "").strip()
         form_data["link_password"] = request.form.get("link_password", "")
+        form_data["account_password"] = request.form.get("account_password", "").strip()
         if not form_data["name"]:
             error = "请填写账号名称"
         else:
@@ -465,6 +509,7 @@ def account_new():
                 secret_norm = validate_base32(form_data["secret"])
                 pyotp.TOTP(secret_norm).now()
                 link_pw_hash = parse_link_password(form_data["link_password"])
+                account_pw = parse_account_password(form_data["account_password"])
                 if form_data["group_name"] != NEW_GROUP_OPTION:
                     resolve_group(form_data["group_name"])   # 先校验，别等到确认重名之后才报错
                 dups = find_same_name(form_data["name"])
@@ -475,10 +520,10 @@ def account_new():
                     token = new_token()
                     execute("""INSERT INTO accounts(
                                  name, secret_encrypted, url_token, url_token_hash,
-                                 group_name, share_password_hash)
-                               VALUES (?,?,?,?, ?,?)""",
+                                 group_name, share_password_hash, password_encrypted)
+                               VALUES (?,?,?,?, ?,?,?)""",
                             (form_data["name"], encrypt_secret(secret_norm),
-                             token, hash_token(token), group, link_pw_hash))
+                             token, hash_token(token), group, link_pw_hash, account_pw))
                     flash("账号已添加。分享链接：" + request.host_url + "t/" + token, "success")
                     return redirect(url_for("dashboard"))
             except ValueError as e:
@@ -496,6 +541,8 @@ def account_edit(aid):
     dup_warning = None
     account = {"name": row["name"], "secret": "", "group_name": row["group_name"] or "",
                "new_group": "",
+               # 编辑页直接带出已保存的账号密码：清空再保存 = 删除
+               "account_password": decrypt_account_password(row["password_encrypted"]),
                "link_password": "", "has_own_password": bool(row["share_password_hash"])}
     if request.method == "POST":
         account["name"] = request.form.get("name", "").strip()[:100]
@@ -503,6 +550,7 @@ def account_edit(aid):
         account["group_name"] = request.form.get("group_name", "").strip()
         account["new_group"] = request.form.get("new_group", "").strip()
         account["link_password"] = request.form.get("link_password", "")
+        account["account_password"] = request.form.get("account_password", "").strip()
         regen = request.form.get("regen_url") == "1"
         clear_pw = request.form.get("clear_link_password") == "1"
         account["regen_url"] = regen
@@ -514,8 +562,8 @@ def account_edit(aid):
                 link_pw_hash = parse_link_password(account["link_password"])
                 if account["group_name"] != NEW_GROUP_OPTION:
                     resolve_group(account["group_name"])
-                sql_parts = ["name=?"]
-                args = [account["name"]]
+                sql_parts = ["name=?", "password_encrypted=?"]
+                args = [account["name"], parse_account_password(account["account_password"])]
                 if account["secret"]:
                     s = validate_base32(account["secret"])
                     pyotp.TOTP(s).now()
@@ -565,6 +613,23 @@ def account_regen(aid):
             (token, hash_token(token), aid))
     return jsonify(ok=True, url_token=token,
                    url=request.host_url.rstrip("/") + "/t/" + token)
+
+@app.route("/admin/accounts/<int:aid>/share-text", methods=["POST"])
+@login_required
+def account_share_text(aid):
+    """「复制信息」：按模板拼出可以直接发给合租人的文字（分组、账号、密码、验证码链接）。
+    用 POST + CSRF，密码明文只在管理员点按钮时才下发，不放进列表页的 HTML。
+    """
+    row = query_one("SELECT name, group_name, url_token, password_encrypted "
+                    "FROM accounts WHERE id=?", (aid,))
+    if not row:
+        return jsonify(ok=False, error="账号不存在"), 404
+    password = decrypt_account_password(row["password_encrypted"])
+    text = render_share_text(
+        get_setting("share_template") or DEFAULT_SHARE_TEMPLATE,
+        row["group_name"], row["name"], password,
+        request.host_url.rstrip("/") + "/t/" + row["url_token"])
+    return jsonify(ok=True, text=text, has_password=bool(password))
 
 @app.route("/admin/accounts/reorder", methods=["POST"])
 @login_required
@@ -682,6 +747,16 @@ def settings():
             else:
                 set_setting("share_password_enabled", "0")
                 msg = "已关闭密码保护"
+        elif action == "share_template":
+            tpl = request.form.get("share_template", "").replace("\r\n", "\n").strip()
+            if len(tpl) > MAX_TEMPLATE_LENGTH:
+                error = f"模板最长 {MAX_TEMPLATE_LENGTH} 个字符"
+            elif not tpl or tpl == DEFAULT_SHARE_TEMPLATE:
+                execute("DELETE FROM settings WHERE key='share_template'")
+                msg = "已恢复默认的分享信息模板"
+            else:
+                set_setting("share_template", tpl)
+                msg = "分享信息模板已保存"
         elif action == "change_admin_password":
             old = request.form.get("old_password", "")
             new = request.form.get("new_password", "")
@@ -717,6 +792,8 @@ def settings():
                 except (VerifyMismatchError, VerificationError):
                     error = "密码错误"
     return render_template("settings.html",
+                           share_template=get_setting("share_template") or DEFAULT_SHARE_TEMPLATE,
+                           share_template_is_default=not get_setting("share_template"),
                            share_pw_enabled=get_setting("share_password_enabled") == "1",
                            current_username=session.get("admin_user", ""),
                            error=error, msg=msg)

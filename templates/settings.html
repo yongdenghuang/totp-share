@@ -23,6 +23,25 @@
 </div>
 
 <div class="card p-4 mb-3">
+ <h5 class="mb-1">分享信息模板</h5>
+ <p class="text-muted small mb-3">
+   账号列表里点「复制信息」时复制出来的文字。可用占位符：
+   <code>{分组}</code> <code>{账号}</code> <code>{密码}</code> <code>{链接}</code>。
+   账号没保存密码时，带 <code>{密码}</code> 的那一行会自动去掉。
+ </p>
+ <form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="share_template">
+  <div class="mb-3">
+   <textarea class="form-control font-monospace" name="share_template" rows="6" maxlength="1000"
+             aria-label="分享信息模板">{{ share_template }}</textarea>
+   <div class="form-text">{% if share_template_is_default %}当前是默认模板。{% else %}清空后保存可恢复默认模板。{% endif %}可以在后面加上你自己的使用须知。</div>
+  </div>
+  <button class="btn btn-primary">保存模板</button>
+ </form>
+</div>
+
+<div class="card p-4 mb-3">
  <h5 class="mb-3">修改管理员用户名</h5>
  <p class="text-muted small">当前用户名：<strong>{{ current_username }}</strong></p>
  <form method="post">
