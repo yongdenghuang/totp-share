@@ -34,12 +34,16 @@
 
     <div class="mb-3">
       <label class="form-label" for="account_password">账号密码</label>
-      <input class="form-control font-monospace" id="account_password" name="account_password"
-             value="{{ account.account_password or '' }}" maxlength="200"
-             autocomplete="off" autocapitalize="off" spellcheck="false"
-             placeholder="这个账号本身的登录密码">
+      <div class="input-group">
+        <input class="form-control font-monospace" id="account_password" name="account_password"
+               value="{{ account.account_password or '' }}" maxlength="200"
+               autocomplete="off" autocapitalize="off" spellcheck="false"
+               placeholder="这个账号本身的登录密码">
+        <button class="btn btn-outline-secondary" type="button" id="pwGenerate" title="随机生成一个强密码">生成</button>
+        <button class="btn btn-outline-secondary" type="button" id="pwCopy">复制</button>
+      </div>
       <div class="form-text">
-        可选。加密保存，只用于列表页的「复制信息」——一键复制分组、账号、密码和验证码链接，直接发给合租人。
+        可选。加密保存，只用于列表页的「复制信息」——一键复制分组、账号、密码和验证码链接，直接发给对方。
         {% if mode=='edit' %}清空后保存即删除。{% endif %}
       </div>
     </div>
@@ -96,7 +100,25 @@
 {% endblock %}
 
 {% block scripts %}
+{% include "_pwgen.html" %}
 <script>
+(function(){
+  // 账号密码：生成 / 复制
+  var pwInput = document.getElementById('account_password');
+  document.getElementById('pwGenerate').addEventListener('click', function(){
+    if (pwInput.value && !confirm('用新生成的密码替换输入框里现在的密码？')) return;
+    pwInput.value = PwGen.generate(PwGen.loadPrefs());
+    pwInput.focus();
+  });
+  document.getElementById('pwCopy').addEventListener('click', function(){
+    var btn = this;
+    if (!pwInput.value || !navigator.clipboard) return;
+    navigator.clipboard.writeText(pwInput.value).then(function(){
+      var old = btn.textContent; btn.textContent = '已复制';
+      setTimeout(function(){ btn.textContent = old; }, 1200);
+    });
+  });
+})();
 (function(){
   // 输入名称时即时提示重名（最终以保存时服务端的检查为准）
   var existing = {{ existing_names|tojson }}.map(norm);

@@ -159,6 +159,21 @@ def parse_account_password(raw):
         raise ValueError(f"账号密码最长 {MAX_ACCOUNT_PASSWORD} 个字符")
     return encrypt_secret(s)
 
+def password_change_sql(row, new_plain):
+    """把账号密码改成 new_plain 需要的 SET 片段和参数；没变化时返回空。
+    原来有密码的话顺手存成「上一个密码」：经常改密码时，万一官网那边没改成功，
+    或者新密码没来得及记下，还能从这里把旧的找回来。
+    """
+    new_plain = (new_plain or "").strip()
+    old_plain = decrypt_account_password(row["password_encrypted"])
+    if new_plain == old_plain:
+        return [], []
+    parts, args = ["password_encrypted=?"], [parse_account_password(new_plain)]
+    if old_plain:
+        parts.append("password_prev_encrypted=?")
+        args.append(row["password_encrypted"])
+    return parts, args
+
 def decrypt_account_password(enc):
     if not enc:
         return ""
@@ -562,8 +577,11 @@ def account_edit(aid):
                 link_pw_hash = parse_link_password(account["link_password"])
                 if account["group_name"] != NEW_GROUP_OPTION:
                     resolve_group(account["group_name"])
-                sql_parts = ["name=?", "password_encrypted=?"]
-                args = [account["name"], parse_account_password(account["account_password"])]
+                sql_parts = ["name=?"]
+                args = [account["name"]]
+                pw_sql, pw_args = password_change_sql(row, account["account_password"])
+                sql_parts += pw_sql
+                args += pw_args
                 if account["secret"]:
                     s = validate_base32(account["secret"])
                     pyotp.TOTP(s).now()
@@ -630,6 +648,36 @@ def account_share_text(aid):
         row["group_name"], row["name"], password,
         request.host_url.rstrip("/") + "/t/" + row["url_token"])
     return jsonify(ok=True, text=text, has_password=bool(password))
+
+@app.route("/admin/accounts/<int:aid>/password/reveal", methods=["POST"])
+@login_required
+def account_password_reveal(aid):
+    """「改密码」弹窗用：取当前密码和上一个密码（去官网改密码时通常要先填当前密码）。"""
+    row = query_one("SELECT password_encrypted, password_prev_encrypted FROM accounts WHERE id=?", (aid,))
+    if not row:
+        return jsonify(ok=False, error="账号不存在"), 404
+    return jsonify(ok=True,
+                   password=decrypt_account_password(row["password_encrypted"]),
+                   previous=decrypt_account_password(row["password_prev_encrypted"]))
+
+@app.route("/admin/accounts/<int:aid>/password", methods=["POST"])
+@login_required
+def account_password_save(aid):
+    """「改密码」弹窗用：把新密码存下来，原密码转存为「上一个密码」。"""
+    row = query_one("SELECT password_encrypted FROM accounts WHERE id=?", (aid,))
+    if not row:
+        return jsonify(ok=False, error="账号不存在"), 404
+    data = request.get_json(silent=True) or {}
+    new_plain = str(data.get("password") or "").strip()
+    if not new_plain:
+        return jsonify(ok=False, error="新密码不能为空（要删除密码请到「编辑」里清空）"), 400
+    try:
+        parts, args = password_change_sql(row, new_plain)
+    except ValueError as e:
+        return jsonify(ok=False, error=str(e)), 400
+    if parts:
+        execute(f"UPDATE accounts SET {', '.join(parts)} WHERE id=?", args + [aid])
+    return jsonify(ok=True, changed=bool(parts))
 
 @app.route("/admin/accounts/reorder", methods=["POST"])
 @login_required

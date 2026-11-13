@@ -437,3 +437,44 @@ def test_custom_share_template(ctx):
     r = post(c, "/admin/settings", data={"action": "share_template", "share_template": ""})
     assert "已恢复默认" in r.get_data(as_text=True)
     assert post(c, "/admin/accounts/1/share-text", json={}).get_json()["text"].startswith("账号密码\n帐户：plus-01")
+
+
+# ---------- 改密码（生成器弹窗背后的接口） ----------
+def test_password_reveal_and_save_keep_previous(ctx):
+    c = ctx.admin()
+    assert post(c, "/admin/accounts/1/password/reveal", json={}).get_json() == {"ok": True, "password": "", "previous": ""}
+    assert post(c, "/admin/accounts/1/password", json={"password": " First-Gen-1 "}).get_json() == {"ok": True, "changed": True}
+    assert post(c, "/admin/accounts/1/password", json={"password": "Second-Gen-2"}).get_json()["changed"] is True
+    r = post(c, "/admin/accounts/1/password/reveal", json={})
+    assert "no-store" in r.headers["Cache-Control"]
+    assert r.get_json() == {"ok": True, "password": "Second-Gen-2", "previous": "First-Gen-1"}
+    # 存同一个密码：不算修改，「上一个密码」不会被冲掉
+    assert post(c, "/admin/accounts/1/password", json={"password": "Second-Gen-2"}).get_json()["changed"] is False
+    assert post(c, "/admin/accounts/1/password/reveal", json={}).get_json()["previous"] == "First-Gen-1"
+    # 复制信息用的是新密码
+    assert "密码：Second-Gen-2" in post(c, "/admin/accounts/1/share-text", json={}).get_json()["text"]
+    # 库里两份都是密文
+    row = ctx.sql("SELECT password_encrypted, password_prev_encrypted FROM accounts WHERE id=1")[0]
+    assert b"Second-Gen-2" not in bytes(row["password_encrypted"]) and b"First-Gen-1" not in bytes(row["password_prev_encrypted"])
+
+
+def test_password_endpoints_validate_and_require_login(ctx):
+    anon = ctx.client()
+    assert post(anon, "/admin/accounts/1/password/reveal", json={}).status_code == 401
+    assert post(anon, "/admin/accounts/1/password", json={"password": "x"}).status_code == 401
+    c = ctx.admin()
+    assert post(c, "/admin/accounts/9999/password/reveal", json={}).status_code == 404
+    assert post(c, "/admin/accounts/9999/password", json={"password": "abc"}).status_code == 404
+    assert post(c, "/admin/accounts/1/password", json={"password": "   "}).status_code == 400
+    assert post(c, "/admin/accounts/1/password", json={"password": "x" * 201}).status_code == 400
+    assert ctx.sql("SELECT password_encrypted FROM accounts WHERE id=1")[0]["password_encrypted"] is None
+
+
+def test_edit_form_also_keeps_previous_password(ctx):
+    c = ctx.admin()
+    post(c, "/admin/accounts/1/edit", data={"name": "plus-01", "account_password": "old-one"})
+    post(c, "/admin/accounts/1/edit", data={"name": "plus-01", "account_password": "new-one"})
+    assert post(c, "/admin/accounts/1/password/reveal", json={}).get_json() == {"ok": True, "password": "new-one", "previous": "old-one"}
+    # 只改别的字段、密码没动：两份都保持原样
+    post(c, "/admin/accounts/1/edit", data={"name": "plus-01-renamed", "account_password": "new-one"})
+    assert post(c, "/admin/accounts/1/password/reveal", json={}).get_json()["previous"] == "old-one"
