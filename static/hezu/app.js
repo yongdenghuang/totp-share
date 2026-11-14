@@ -26,7 +26,7 @@
   let A = [];                         // 验证码账号名单（不含密钥和密码）
   let CSRF = document.getElementById('app').dataset.csrf || '';
   const API = '/admin/hezu/api';
-  const codes = { map: {}, until: 0, timer: null, els: [] };   // 当前验证码，只显示不保存
+  const codes = { map: {}, until: 0, period: 30, timer: null, els: [], timers: [] };   // 当前验证码，只显示不保存
   const view = { tab: 'home', month: null, unlocked: {}, q: '', country: '' };
   let updaters = [];                  // 改数字后需要刷新的合计
   let searchRows = [];                // 当前页面可被搜索过滤的行
@@ -412,7 +412,7 @@
     let wait = 30000;
     try {
       const r = await fetch('/admin/codes', { credentials: 'same-origin' });
-      if (r.ok) { const d = await r.json(); codes.map = d.codes || {}; codes.until = Date.now() + d.remaining * 1000; wait = d.remaining * 1000 + 500; }
+      if (r.ok) { const d = await r.json(); codes.map = d.codes || {}; codes.until = Date.now() + d.remaining * 1000; codes.period = d.period || 30; wait = d.remaining * 1000 + 500; }
       else codes.map = {};
     } catch (e) { /* 断网时稍后再取 */ }
     paintCodes();
@@ -420,6 +420,16 @@
   }
   function paintCodes() {
     const left = Math.max(0, Math.round((codes.until - Date.now()) / 1000));
+    for (const t of codes.timers) {
+      const on = codes.until > 0;
+      t.el.hidden = !on; if (!on) continue;
+      t.el.classList.toggle('low', left <= 5);
+      t.bar.style.transition = left > t.prev ? 'none' : '';   // 换码那一下直接回满，不倒着动画
+      t.bar.style.width = Math.round(left / codes.period * 100) + '%';
+      t.sec.textContent = left + 's';
+      t.el.title = '验证码 ' + left + ' 秒后更新';
+      t.prev = left;
+    }
     for (const x of codes.els) {
       if (x.el.dataset.busy) continue;
       const c = codes.map[String(x.id)];
@@ -758,11 +768,18 @@
     searchRows.push({ tr, row });
     return tr;
   }
+  // 表头「账号」一栏右边的验证码倒计时，正好在验证码那一列上方
+  function codeTimerHead(label) {
+    const bar = h('i'), sec = h('span', { class: 'sec' });
+    const el = h('span', { class: 'code-timer', hidden: true, 'aria-label': '验证码刷新倒计时' }, h('span', { class: 'track' }, bar), sec);
+    codes.timers.push({ el, bar, sec, prev: 0 });
+    return h('div', { class: 'acct-head' }, h('span', { text: label }), el);
+  }
   function tableEl(sheet, rows, list, editable, live) {
     const cols = [['账号', 240], ['续费日期', 134], ['续费卡信息', 126], ['卡号', 118], [sheet.mode === 'members' ? '收费情况（每人）' : '单价 × 人数', 0], ['收费', 76, 1], ['续费成本', 78, 1], ['利润', 92, 1], ['备注', 88], ['', 42]];
     return h('div', { class: 'scroll' }, h('table', { class: 'grid', style: 'min-width:1170px;table-layout:fixed' },
       h('colgroup', null, cols.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
-      h('thead', null, h('tr', null, cols.map(c => h('th', { class: c[2] ? 'r' : '', text: c[0] })))),
+      h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: c[2] ? 'r' : '' }, i === 0 && list.some(r => r.totpId > 0 && totpById(r.totpId)) ? codeTimerHead(c[0]) : c[0])))),
       h('tbody', null, list.map(r => rowEl(sheet, rows, r, editable, live)))));
   }
   function section(sheet, rows, group, filter, editable, live) {
@@ -1344,7 +1361,7 @@
 
   // ---------- 页面 ----------
   function render() {
-    closePop(); updaters = []; searchRows = []; codes.els = [];
+    closePop(); updaters = []; searchRows = []; codes.els = []; codes.timers = [];
     if (location.hash.slice(1) !== view.tab && !location.search) history.replaceState(null, '', '#' + view.tab);
     const M = S.months[view.month], keys = monthKeys(), isLatest = view.month === keys[keys.length - 1], i = keys.indexOf(view.month);
     const go = ym => { view.month = ym; render(); };
