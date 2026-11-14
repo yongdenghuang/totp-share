@@ -27,7 +27,7 @@
   let CSRF = document.getElementById('app').dataset.csrf || '';
   const API = '/admin/hezu/api';
   const codes = { map: {}, until: 0, period: 30, timer: null, els: [], timers: [] };   // 当前验证码，只显示不保存
-  const view = { tab: 'home', month: null, unlocked: {}, q: '', country: '' };
+  const view = { tab: 'home', month: null, unlocked: {}, q: '', country: '', gfilter: null };   // gfilter: null = 全部，'__loose' = 未分组，否则分组 id
   let updaters = [];                  // 改数字后需要刷新的合计
   let searchRows = [];                // 当前页面可被搜索过滤的行
   let dirty = false, saving = false, saveTimer = null, statusEl = null;
@@ -826,15 +826,15 @@
     const out = [tiles(() => stats(sheet, rows))];
     const q = h('input', { type: 'search', placeholder: '搜索账号、备注、卡种', value: view.q, 'aria-label': '搜索' });
     q.addEventListener('input', () => { view.q = q.value; applySearch(); });
-    const bar = h('div', { class: 'toolbar' }, h('label', { class: 'search' }, icon('search', 15), q), h('span', { class: 'spacer' }));
-    if (sheet.grouped) bar.append(h('button', { class: 'btn small', type: 'button', text: '分组', onclick: e => groupsMenu(e.currentTarget) }));
-    bar.append(h('button', { class: 'btn ghost small', type: 'button', text: '表设置', onclick: e => sheetMenu(e.currentTarget, sheet) }));
+    const bar = h('div', { class: 'toolbar' }, h('label', { class: 'search' }, icon('search', 15), q));
+    if (sheet.grouped) bar.append(groupChips(rows));
+    bar.append(h('span', { class: 'spacer' }), h('button', { class: 'btn ghost small', type: 'button', text: '表设置', onclick: e => sheetMenu(e.currentTarget, sheet) }));
     out.push(bar);
     if (sheet.grouped) {
-      const ids = new Set(G.map(g => g.id));
-      G.forEach(g => out.push(section(sheet, rows, g, r => r.group === g.id, editable, live)));
-      if (rows.some(r => !ids.has(r.group))) out.push(section(sheet, rows, LOOSE, r => !ids.has(r.group), editable, live));
-      if (!G.length) out.push(h('div', { class: 'empty', text: '还没有分组，点上面的“分组”新建。' }));
+      const ids = new Set(G.map(g => g.id)), f = view.gfilter;
+      G.forEach(g => { if (f === null || f === g.id) out.push(section(sheet, rows, g, r => r.group === g.id, editable, live)); });
+      if ((f === null || f === '__loose') && rows.some(r => !ids.has(r.group))) out.push(section(sheet, rows, LOOSE, r => !ids.has(r.group), editable, live));
+      if (!G.length) out.push(h('div', { class: 'empty', text: '还没有分组，点上面的“管理分组”新建。' }));
     } else out.push(section(sheet, rows, null, () => true, editable, live));
     return out;
   }
@@ -895,6 +895,59 @@
     else setStatus('已添加验证码账号');
   }
 
+  // ---------- 分组筛选条（和验证码列表一样：点一下筛选，拖动调整顺序） ----------
+  let dragGroup = null;
+  function groupChips(rows) {
+    const ids = new Set(G.map(g => g.id)), counts = {}; let loose = 0;
+    rows.forEach(r => { if (ids.has(r.group)) counts[r.group] = (counts[r.group] || 0) + 1; else loose++; });
+    if (view.gfilter === '__loose' ? !loose : view.gfilter !== null && !ids.has(view.gfilter)) view.gfilter = null;
+    const box = h('div', { class: 'chipset gchips' });
+    const chip = (label, val, n, g) => {
+      const b = h('button', { class: 'fchip' + (view.gfilter === val ? ' on' : ''), type: 'button', onclick: () => { view.gfilter = val; render(); } },
+        g ? h('span', { class: 'gdot', style: 'background:' + g.color }) : null, label + ' ' + n);
+      if (g) dragChip(b, g);
+      return b;
+    };
+    box.append(chip('全部', null, rows.length));
+    G.forEach(g => box.append(chip(g.name, g.id, counts[g.id] || 0, g)));
+    if (loose) box.append(chip('未分组', '__loose', loose));
+    box.append(h('button', { class: 'btn ghost small', type: 'button', text: G.length ? '管理分组' : '＋ 新建分组', onclick: e => groupsMenu(e.currentTarget) }));
+    return box;
+  }
+  function dragChip(b, g) {
+    b.draggable = true;
+    b.title = '点一下筛选，拖动可以调整分组顺序';
+    const clear = () => document.querySelectorAll('.gchips .drop-before, .gchips .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+    b.addEventListener('dragstart', e => { dragGroup = g.id; b.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', g.id); });
+    b.addEventListener('dragend', () => { dragGroup = null; b.classList.remove('dragging'); clear(); });
+    b.addEventListener('dragover', e => {
+      if (!dragGroup || dragGroup === g.id) return;
+      e.preventDefault();
+      const r = b.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
+      b.classList.toggle('drop-after', after); b.classList.toggle('drop-before', !after);
+    });
+    b.addEventListener('dragleave', () => b.classList.remove('drop-before', 'drop-after'));
+    b.addEventListener('drop', e => {
+      e.preventDefault();
+      const after = b.classList.contains('drop-after'), from = dragGroup;
+      clear();
+      if (from && from !== g.id) moveGroup(from, g.id, after);
+    });
+  }
+  async function moveGroup(fromId, toId, after) {
+    const list = G.filter(x => x.id !== fromId), moved = G.find(x => x.id === fromId);
+    list.splice(list.findIndex(x => x.id === toId) + (after ? 1 : 0), 0, moved);
+    G = list; render();
+    try {
+      const r = await api('POST', '/admin/groups/reorder', { order: list.map(x => x.name) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      setStatus('分组顺序已保存');
+    } catch (e) {
+      setStatus('分组顺序没保存上', true);
+      await refreshContext(); render();
+    }
+  }
+
   // ---------- 分组 / 表 管理 ----------
   // 分组和验证码账号共用一套：这里只能新建，改名、换颜色、删除去验证码后台的分组管理页
   async function createGroup(name) {
@@ -912,7 +965,7 @@
   function groupsMenu(btn) {
     menu(btn, [
       { text: '新建分组…', run: async () => { if (await newGroupDialog()) render(); } },
-      { text: '改名、换颜色、删除（去分组管理页）', run: () => leave('/admin/groups') },
+      { text: '改名、换颜色、排序、删除（去分组管理页）', run: () => leave('/admin/groups') },
     ]);
   }
   async function sheetForm(sheet) {

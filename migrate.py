@@ -121,6 +121,11 @@ def ensure_schema(db):
     if "color" not in {r[1] for r in db.execute("PRAGMA table_info(account_groups)")}:
         db.execute("ALTER TABLE account_groups ADD COLUMN color TEXT")
         changes.append("account_groups.color")
+    # 分组的显示顺序（验证码列表和合租账本共用）；老分组按创建顺序排
+    if "sort_order" not in {r[1] for r in db.execute("PRAGMA table_info(account_groups)")}:
+        db.execute("ALTER TABLE account_groups ADD COLUMN sort_order INTEGER")
+        changes.append("account_groups.sort_order")
+    db.execute("UPDATE account_groups SET sort_order = id WHERE sort_order IS NULL")
     # 还没有颜色的分组，按创建顺序各分一个不重复的颜色
     used = [r[0] for r in db.execute("SELECT color FROM account_groups WHERE color IS NOT NULL")]
     for (gid,) in db.execute("SELECT id FROM account_groups WHERE color IS NULL ORDER BY id").fetchall():

@@ -97,7 +97,7 @@ def save_state(state, expected_rev):
 def context():
     """账本页面要用到的验证码后台数据：分组（共用一套）和账号名单。不含任何密钥、密码。"""
     groups = []
-    for r in _core.query_all("SELECT id, name, color FROM account_groups ORDER BY id"):
+    for r in _core.query_all("SELECT id, name, color FROM account_groups ORDER BY COALESCE(sort_order, id), id"):
         color = r["color"] or UNGROUPED_COLOR
         groups.append({"id": str(r["id"]), "name": r["name"], "color": color,
                        "text": _core.text_color_on(color)})

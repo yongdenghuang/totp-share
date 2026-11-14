@@ -19,17 +19,28 @@
            placeholder="例如：plus、pro20x、plus代充">
     <button class="btn btn-primary text-nowrap">新建</button>
   </form>
-  <div class="form-text">新分组会自动分到一个没用过的标签颜色，可以在下面改。建好后，在添加或编辑账号时就能从下拉框里选它；账号列表里也可以直接点「分组」单元格改。</div>
+  <div class="form-text">分组的先后顺序在下面用 ↑ ↓ 调整，也可以在账号列表或合租账本顶部直接拖动分组标签；两边共用同一个顺序。新分组会自动分到一个没用过的标签颜色，可以在下面改。建好后，在添加或编辑账号时就能从下拉框里选它；账号列表里也可以直接点「分组」单元格改。</div>
 </div>
 
 <div class="card">
  <div class="table-responsive"><table class="table mb-0 align-middle">
   <thead class="table-light">
-    <tr><th>标签颜色与名称</th><th style="width:110px">账号数</th><th style="width:90px"></th></tr>
+    <tr><th style="width:84px">顺序</th><th>标签颜色与名称</th><th style="width:110px">账号数</th><th style="width:90px"></th></tr>
   </thead>
   <tbody>
   {% for g in groups %}
     <tr>
+      <td class="text-nowrap">
+        {% for dir, label, hidden in (("up", "↑", loop.first), ("down", "↓", loop.last)) %}
+        <form method="post" class="d-inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="move">
+          <input type="hidden" name="direction" value="{{ dir }}">
+          <input type="hidden" name="old_name" value="{{ g.name }}">
+          <button class="btn btn-sm btn-outline-secondary px-2{% if hidden %} invisible{% endif %}" aria-label="{{ '上移' if dir == 'up' else '下移' }}「{{ g.name }}」">{{ label }}</button>
+        </form>
+        {% endfor %}
+      </td>
       <td>
         <form method="post" class="d-flex gap-2">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -54,7 +65,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="3" class="text-center text-muted py-5">还没有分组，在上面新建一个。</td></tr>
+    <tr><td colspan="4" class="text-center text-muted py-5">还没有分组，在上面新建一个。</td></tr>
   {% endfor %}
   </tbody>
  </table></div>

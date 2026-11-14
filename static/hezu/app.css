@@ -228,3 +228,11 @@ dialog.dlg::backdrop { background: rgba(10, 12, 24, .45); }
 .code-timer .sec { min-width: 22px; text-align: right; }
 .code-timer.low { color: var(--bad); }
 .code-timer.low .track i { background: var(--bad); }
+.gchips { align-items: center; }
+.gchips .fchip { display: inline-flex; align-items: center; gap: 6px; }
+.gchips .fchip[draggable="true"] { cursor: grab; }
+.gchips .fchip.dragging { opacity: .4; }
+.gchips .fchip.drop-before { box-shadow: -3px 0 0 0 var(--accent); }
+.gchips .fchip.drop-after { box-shadow: 3px 0 0 0 var(--accent); }
+.gdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.fchip.on .gdot { box-shadow: 0 0 0 1.5px var(--on-accent); }

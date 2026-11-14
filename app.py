@@ -437,13 +437,13 @@ def text_color_on(bg):
 def group_rows():
     """全部分组及其标签配色：[{"name", "color", "text"}]，按创建顺序。"""
     out = []
-    for r in query_all("SELECT name, color FROM account_groups ORDER BY id"):
+    for r in query_all("SELECT name, color FROM account_groups ORDER BY COALESCE(sort_order, id), id"):
         color = r["color"] or "#6c757d"
         out.append({"name": r["name"], "color": color, "text": text_color_on(color)})
     return out
 
 def list_groups():
-    return [r["name"] for r in query_all("SELECT name FROM account_groups ORDER BY id")]
+    return [r["name"] for r in query_all("SELECT name FROM account_groups ORDER BY COALESCE(sort_order, id), id")]
 
 def find_group(name):
     """按名称找已有分组（忽略大小写和多余空白），返回库里的规范写法或 None。"""
@@ -461,9 +461,23 @@ def create_group(raw):
     if existing:
         return existing
     used = [r["color"] for r in query_all("SELECT color FROM account_groups")]
-    execute("INSERT INTO account_groups(name, color) VALUES (?, ?)",
+    execute("INSERT INTO account_groups(name, color, sort_order) "
+            "VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM account_groups))",
             (name, next_group_color(used)))
     return name
+
+def save_group_order(names):
+    """按 names 的先后保存分组顺序；没列到的分组排在后面，保持原来的相对顺序。"""
+    known = list_groups()
+    picked = []
+    for n in names:
+        g = find_group(n)
+        if g and g not in picked:
+            picked.append(g)
+    db = get_db()
+    for idx, name in enumerate(picked + [g for g in known if g not in picked]):
+        db.execute("UPDATE account_groups SET sort_order=? WHERE name=?", (idx + 1, name))
+    db.commit()
 
 def resolve_group(raw):
     """把提交上来的分组名对应到已有分组。留空 = 未分组（返回 None）。"""
@@ -754,6 +768,16 @@ def groups_page():
                 db.execute("UPDATE accounts SET group_name=? WHERE group_name=?", (new, old))
                 db.commit()
                 msg = f"已把「{old}」改名为「{new}」" if new != old else f"已保存「{new}」"
+            elif action == "move":
+                old = find_group(request.form.get("old_name", ""))
+                if not old:
+                    raise ValueError("分组不存在")
+                names = list_groups()
+                i = names.index(old)
+                j = i - 1 if request.form.get("direction") == "up" else i + 1
+                if 0 <= j < len(names):
+                    names[i], names[j] = names[j], names[i]
+                    save_group_order(names)
             elif action == "delete":
                 old = find_group(request.form.get("old_name", ""))
                 if not old:
@@ -770,6 +794,17 @@ def groups_page():
         "WHERE group_name IS NOT NULL GROUP BY group_name")}
     return render_template("groups.html", error=error, msg=msg,
                            groups=[dict(g, count=counts.get(g["name"], 0)) for g in group_rows()])
+
+@app.route("/admin/groups/reorder", methods=["POST"])
+@login_required
+def groups_reorder():
+    """拖动分组标签调整顺序。请求体: {"order": ["分组名", ...]}，验证码列表和合租账本共用这个顺序。"""
+    data = request.get_json(silent=True) or {}
+    order = data.get("order")
+    if not isinstance(order, list) or len(order) > 500 or not all(isinstance(x, str) for x in order):
+        return jsonify(ok=False, error="参数错误"), 400
+    save_group_order(order)
+    return jsonify(ok=True, groups=list_groups())
 
 # ---------- 设置 ----------
 @app.route("/admin/settings", methods=["GET", "POST"])

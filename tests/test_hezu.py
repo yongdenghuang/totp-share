@@ -319,3 +319,51 @@ def test_public_and_login_pages_have_no_sidebar(ctx):
         html = call(c, "get", path).get_data(as_text=True)
         assert 'class="side"' not in html and "/admin/hezu" not in html
     assert "hezu/shell.css" not in call(c, "get", "/t/" + token).get_data(as_text=True)   # 分享页样式不变
+
+
+# ---------- 分组顺序（验证码列表和账本共用） ----------
+def group_names(ctx):
+    return [r["name"] for r in ctx.sql("SELECT name FROM account_groups ORDER BY COALESCE(sort_order, id), id")]
+
+
+def test_group_order_is_shared_and_reorderable(ctx):
+    c = ctx.admin()
+    for n in ("A组", "B组", "C组"):
+        call(c, "post", f"{API}/groups", json={"name": n})
+    assert group_names(ctx) == ["A组", "B组", "C组"]
+    r = call(c, "post", "/admin/groups/reorder", json={"order": ["c组", "A组", "没有这个", "C组"]})
+    assert r.status_code == 200 and r.get_json()["groups"] == ["C组", "A组", "B组"]   # 没列到的排后面，不认识的忽略
+    assert [g["name"] for g in call(c, "get", f"{API}/context").get_json()["groups"]] == ["C组", "A组", "B组"]
+    html = call(c, "get", "/admin/dashboard").get_data(as_text=True)
+    assert html.index('"C组"') < html.index('"A组"') < html.index('"B组"')       # 验证码列表的分组标签也按这个顺序
+    call(c, "post", f"{API}/groups", json={"name": "D组"})
+    assert group_names(ctx)[-1] == "D组"                                          # 新分组排在最后
+    for bad in ({"order": "C组"}, {"order": [1, 2]}, {}):
+        assert call(c, "post", "/admin/groups/reorder", json=bad).status_code == 400
+    assert call(ctx.client(), "post", "/admin/groups/reorder", json={"order": []}).status_code == 401
+
+
+def test_groups_page_move_buttons(ctx):
+    c = ctx.admin()
+    for n in ("A组", "B组", "C组"):
+        call(c, "post", f"{API}/groups", json={"name": n})
+    call(c, "post", "/admin/groups", data={"action": "move", "direction": "up", "old_name": "C组"})
+    assert group_names(ctx) == ["A组", "C组", "B组"]
+    call(c, "post", "/admin/groups", data={"action": "move", "direction": "down", "old_name": "A组"})
+    assert group_names(ctx) == ["C组", "A组", "B组"]
+    call(c, "post", "/admin/groups", data={"action": "move", "direction": "up", "old_name": "C组"})   # 已经是第一个
+    assert group_names(ctx) == ["C组", "A组", "B组"]
+    html = call(c, "get", "/admin/groups").get_data(as_text=True)
+    assert html.index('value="C组"') < html.index('value="A组"') < html.index('value="B组"')
+
+
+def test_old_groups_get_an_order_on_upgrade(ctx):
+    import sqlite3
+    from migrate import ensure_schema
+    db = sqlite3.connect(ctx.path)
+    db.execute("INSERT INTO account_groups(name, color) VALUES ('老分组甲', '#2563eb'), ('老分组乙', '#16a34a')")
+    db.execute("UPDATE account_groups SET sort_order=NULL")
+    db.commit()
+    assert ensure_schema(db) == []          # 列已经在了，补顺序不算结构变更
+    assert [r[0] for r in db.execute("SELECT name FROM account_groups ORDER BY sort_order")] == ["老分组甲", "老分组乙"]
+    db.close()

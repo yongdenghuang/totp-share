@@ -26,7 +26,7 @@
   </div>
 </div>
 <div class="small text-muted mb-3">
-  点验证码复制 ·「复制信息」一键复制账号、密码和验证码链接 · 点分组单元格直接换组 · 拖 <span class="drag-handle-inline">⋮⋮</span> 排序 · 点表头按列排序
+  点验证码复制 ·「复制信息」一键复制账号、密码和验证码链接 · 拖分组标签调整顺序 · 点分组单元格直接换组 · 拖 <span class="drag-handle-inline">⋮⋮</span> 排序 · 点表头按列排序
   <span id="saveStatus" class="ms-2"></span>
 </div>
 
@@ -186,6 +186,10 @@
   /* 用 class 而不是 hidden 属性：手机端卡片视图给 tr 设了 display:block，会盖掉 hidden */
   #accountsTable tr.row-hidden { display: none !important; }
   #groupChips .btn { --bs-btn-padding-y: .15rem; --bs-btn-padding-x: .6rem; --bs-btn-font-size: .8rem; border-radius: 999px; }
+  #groupChips .btn[draggable="true"] { cursor: grab; }
+  #groupChips .btn.dragging { opacity: .4; }
+  #groupChips .btn.drop-before { box-shadow: -3px 0 0 0 var(--bs-primary); }
+  #groupChips .btn.drop-after { box-shadow: 3px 0 0 0 var(--bs-primary); }
 
   /* 验证码 */
   .code-btn {
@@ -578,6 +582,7 @@
       }
       b.appendChild(document.createTextNode(label + ' ' + n));
       b.addEventListener('click', function(){ activeGroup = value; renderChips(); applyFilter(); });
+      if (typeof value === 'string' && groupMeta.hasOwnProperty(value)) makeChipDraggable(b, value);
       chipsEl.appendChild(b);
     }
     chip('全部', null, rows.length);
@@ -585,6 +590,43 @@
     if (ungrouped) chip('未分组', UNGROUPED, ungrouped);
     manage.textContent = '管理分组';
     chipsEl.appendChild(manage);
+  }
+
+  // 拖动分组标签调整顺序：整个后台共用同一个顺序
+  var dragGroup = null;
+  function clearDropMarks(){
+    Array.prototype.forEach.call(chipsEl.querySelectorAll('.drop-before, .drop-after'), function(x){
+      x.classList.remove('drop-before', 'drop-after');
+    });
+  }
+  function makeChipDraggable(b, name){
+    b.draggable = true;
+    b.title = '点一下筛选，拖动可以调整分组顺序';
+    b.addEventListener('dragstart', function(e){
+      dragGroup = name; b.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', name);
+    });
+    b.addEventListener('dragend', function(){ dragGroup = null; b.classList.remove('dragging'); clearDropMarks(); });
+    b.addEventListener('dragover', function(e){
+      if (!dragGroup || dragGroup === name) return;
+      e.preventDefault();
+      var r = b.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
+      b.classList.toggle('drop-after', after); b.classList.toggle('drop-before', !after);
+    });
+    b.addEventListener('dragleave', function(){ b.classList.remove('drop-before', 'drop-after'); });
+    b.addEventListener('drop', function(e){
+      e.preventDefault();
+      var after = b.classList.contains('drop-after'), from = dragGroup;
+      clearDropMarks();
+      if (!from || from === name) return;
+      var list = allGroups.filter(function(g){ return g !== from; });
+      list.splice(list.indexOf(name) + (after ? 1 : 0), 0, from);
+      allGroups = list; renderChips();
+      postJSON('{{ url_for("groups_reorder") }}', { order: list }).then(function(resp){
+        if (resp.status === 200 && resp.data.ok) { allGroups = resp.data.groups; renderChips(); showStatus('✓ 分组顺序已保存'); }
+        else showStatus('✗ 分组顺序没保存上：' + ((resp.data && resp.data.error) || resp.status), 'error');
+      }).catch(function(){ showStatus('✗ 分组顺序没保存上，请刷新页面', 'error'); });
+    });
   }
 
   searchBox.addEventListener('input', applyFilter);
