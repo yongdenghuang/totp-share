@@ -186,6 +186,7 @@
       issuerId: r.issuerId || '', cardId: r.cardId || '', totpId: Number(r.totpId) || 0,
       members: (r.members || []).map(m => ({ name: m.name || '', amount: num(m.amount), paid: !!m.paid })),
       unitPrice: num(r.unitPrice), unitCost: num(r.unitCost), count: num(r.count), cost: num(r.cost), note: r.note || '', stopped: !!r.stopped,
+      password: String(r.password || ''),
     };
     if (!o.issuerId && (r.cardInfo || r.cardNo)) { o.cardInfo = String(r.cardInfo || ''); o.cardNo = String(r.cardNo || ''); }
     return o;
@@ -282,6 +283,10 @@
     const a = totpById(row.totpId);
     if (!a || !sheet.grouped || S.months[ym].archived) return;
     if (!a.group && row.group && G.some(g => g.id === row.group)) pushGroup(a.id, row.group);
+    if (row.password && !a.hasPassword) {
+      const pw = row.password;
+      api('POST', '/admin/accounts/' + a.id + '/password', { password: pw }).then(r => { if (r.ok) { a.hasPassword = true; if (row.password === pw) { row.password = ''; touch(); } } });
+    }
   }
   function moveRow(row, groupId) {
     row.group = groupId;
@@ -824,6 +829,61 @@
   }
 
 
+  // ---------- 账号密码 ----------
+  // 密码不放在页面里，点的时候才向服务器取。Safari 只允许在点击的那一刻发起复制，所以把“还没取回来的密码”直接交给剪贴板
+  async function copyLater(textPromise, el) {
+    try {
+      if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+        try { await navigator.clipboard.write([new ClipboardItem({ 'text/plain': textPromise.then(t => new Blob([t], { type: 'text/plain' })) })]); }
+        catch (e) { if (e && e.name === 'NotAllowedError') throw e; await navigator.clipboard.writeText(await textPromise); }
+      } else await navigator.clipboard.writeText(await textPromise);
+      if (el) flash(el, '已复制');
+    } catch (e) {
+      try { await textPromise; } catch (e2) { return alertBox(e2.message); }
+      alertBox('浏览器不让自动复制，请在“改密码”里查看。');
+    }
+  }
+  function revealPw(a) {
+    return api('POST', '/admin/accounts/' + a.id + '/password/reveal', {}).then(r => r.json().catch(() => ({}))).then(d => {
+      if (!d.ok) throw new Error(d.error || '取不到密码，请刷新页面');
+      return d.password || '';
+    });
+  }
+  function editPw(anchor, a) {
+    const inp = h('input', { type: 'text', placeholder: '账号密码', autocomplete: 'off', spellcheck: false });
+    const err = h('div', { class: 'neg' });
+    const save = async () => {
+      const v = inp.value.trim();
+      if (!v) { err.textContent = '密码不能为空（要删掉密码请到验证码账号的“编辑”里清空）'; return; }
+      const r = await api('POST', '/admin/accounts/' + a.id + '/password', { password: v }), d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) { err.textContent = d.error || '保存失败'; return; }
+      a.hasPassword = true; closePop(); render(); setStatus('账号密码已保存');
+    };
+    const form = h('div', { class: 'form pwform' },
+      h('label', { class: 'field' }, a.name + ' 的账号密码', inp),
+      h('div', { class: 'muted small', text: '和验证码账号里的是同一个密码，改了两边一起变；原来的密码会留作“上一个密码”。' }),
+      err,
+      h('div', { class: 'rowbtns' }, h('button', { class: 'btn small', type: 'button', text: '取消', onclick: closePop }), h('button', { class: 'btn small primary', type: 'button', text: '保存', onclick: save })));
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+    openPop(anchor, form);
+    inp.focus();
+    if (a.hasPassword) revealPw(a).then(p => { if (!inp.value) { inp.value = p; inp.select(); } }).catch(e => { err.textContent = e.message; });
+  }
+  function pwField(row, editable) {
+    const a = row.totpId > 0 ? totpById(row.totpId) : null;
+    // 没关联验证码账号：密码记在账本这一行里（加密保存）；以后关联上了会交给验证码账号
+    if (!a) return copyField(row, 'password', { mask: true, ro: !editable, label: '账号密码', placeholder: '账号密码' });
+    const wrap = h('div', { class: 'cf' });
+    if (!a.hasPassword) {
+      setKids(wrap, editable ? h('button', { class: 'cf-val empty', type: 'button', title: '还没保存密码，点一下设置', onclick: () => editPw(wrap, a) }, '设置密码') : h('span', { class: 'ro faint', text: '—' }));
+      return wrap;
+    }
+    const val = h('button', { class: 'cf-val mono', type: 'button', title: '点一下复制账号密码（和验证码账号里的是同一个）',
+      onclick: () => copyLater(revealPw(a).then(p => { if (!p) throw new Error('这个账号还没保存密码'); return p; }), val) }, '••••••••');
+    setKids(wrap, val, editable ? h('button', { class: 'cf-edit', type: 'button', title: '修改账号密码', 'aria-label': '修改账号密码', onclick: () => editPw(wrap, a) }, icon('pen', 13)) : null);
+    return wrap;
+  }
+
   // ---------- 账号表 ----------
   function rowMenu(btn, sheet, rows, row) {
     const items = [];
@@ -881,10 +941,12 @@
     if (sheet.mode === 'resale') return resaleRowEl(sheet, rows, row, editable);
     const inc = h('td', { class: 'calc r' }), pill = h('span', { class: 'profit' }), prof = h('td', { class: 'calc r' }, pill);
     updaters.push(() => { const v = income(sheet, row); inc.textContent = money(v); profitText(pill, v - rowCost(sheet, row)); });
-    const acct = cell(row, 'account', { ro: !editable, placeholder: '账号', cls: 'strong', label: '账号', title: row.stopped ? '已停止，下个月不会带过去' : '' });
-    acct.addEventListener('change', () => { if (!row.totpId && linkTotp()) { touch(); render(); } });
+    const acct = copyField(row, 'account', { plain: true, ro: !editable, placeholder: '账号', label: '账号',
+      title: row.stopped ? '已停止，下个月不会带过去 · 点一下复制账号' : '点一下复制账号',
+      onChange: () => { if (!row.totpId && linkTotp()) { touch(); render(); } } });
     const tr = h('tr', { class: row.stopped ? 'stopped' : '' },
       h('td', null, h('div', { class: 'acct' }, acct, totpChip(row))),
+      sheet.grouped ? h('td', null, pwField(row, editable)) : null,
       h('td', null, dateCell(row, 'renew', !editable, 3, live && !row.stopped)),
       cardCells(row, editable),
       sheet.mode === 'members' ? membersCell(row, editable) : [
@@ -915,9 +977,9 @@
         h('tbody', null, list.map(r => rowEl(sheet, rows, r, editable, live)))));
     }
     const cols = sheet.mode === 'members'
-      ? [['账号', 240], ['续费日期', 134], ['续费卡信息', 126], ['卡号', 118], ['收费情况（每人）', 0], ['收费', 76, 1], ['续费成本', 78, 1], ['利润', 92, 1], ['备注', 88], ['', 42]]
+      ? [['账号', 240]].concat(sheet.grouped ? [['账号密码', 112]] : [], [['续费日期', 134], ['续费卡信息', 126], ['卡号', 118], ['收费情况（每人）', 0], ['收费', 76, 1], ['续费成本', 78, 1], ['利润', 92, 1], ['备注', 88], ['', 42]])
       : [['账号', 220], ['续费日期', 136], ['续费卡信息', 136], ['卡号', 116], ['单价', 84, 1], ['人数', 70, 2], ['收费', 92, 1], ['续费成本', 92, 1], ['利润', 100, 1], ['备注', 0], ['', 42]];
-    return h('div', { class: 'scroll' }, h('table', { class: 'grid' + (sheet.mode === 'members' ? '' : ' unitsheet'), style: (sheet.mode === 'members' ? 'min-width:1170px' : 'min-width:1180px') + ';table-layout:fixed' },
+    return h('div', { class: 'scroll' }, h('table', { class: 'grid' + (sheet.mode === 'members' ? '' : ' unitsheet'), style: (sheet.mode === 'members' ? 'min-width:' + (sheet.grouped ? 1290 : 1170) + 'px' : 'min-width:1180px') + ';table-layout:fixed' },
       h('colgroup', null, cols.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
       h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: c[2] === 1 ? 'r' : c[2] === 2 ? 'c' : '' }, i === 0 && list.some(r => r.totpId > 0 && totpById(r.totpId)) ? codeTimerHead(c[0]) : c[0])))),
       h('tbody', null, list.map(r => rowEl(sheet, rows, r, editable, live)))));
@@ -1282,19 +1344,21 @@
   function copyField(v, key, opts) {
     const wrap = h('div', { class: 'cf' });
     const editor = () => {
-      const inp = cell(v, key, { cls: opts.mono ? 'mono' : '', placeholder: opts.placeholder, label: opts.label });
+      const inp = cell(v, key, { cls: (opts.mono ? 'mono ' : '') + (opts.plain ? 'strong' : ''), placeholder: opts.placeholder, label: opts.label });
       inp.addEventListener('blur', () => { if (v[key]) setTimeout(draw, 0); });
+      if (opts.onChange) inp.addEventListener('change', opts.onChange);
       return inp;
     };
     function draw(edit) {
-      if (edit || !v[key]) {
+      if (!opts.ro && (edit || !v[key])) {
         const inp = editor(); setKids(wrap, inp);
         if (edit) { inp.focus(); inp.select(); }
         return;
       }
-      const val = h('button', { class: 'cf-val' + (opts.mono ? ' mono' : ''), type: 'button', title: '点一下复制' + opts.label, onclick: () => copyQuiet(v[key], val) },
+      if (!v[key]) return setKids(wrap, h('span', { class: 'ro faint', text: '—' }));
+      const val = h('button', { class: 'cf-val' + (opts.mono ? ' mono' : '') + (opts.plain ? ' plain' : ''), type: 'button', title: opts.title || '点一下复制' + opts.label, onclick: () => copyQuiet(v[key], val) },
         opts.mask ? '••••••••' : v[key]);
-      setKids(wrap, val, h('button', { class: 'cf-edit', type: 'button', title: '修改' + opts.label, 'aria-label': '修改' + opts.label, onclick: () => draw(true) }, icon('pen', 13)));
+      setKids(wrap, val, opts.ro ? null : h('button', { class: 'cf-edit', type: 'button', title: '修改' + opts.label, 'aria-label': '修改' + opts.label, onclick: () => draw(true) }, icon('pen', 13)));
     }
     draw(false);
     return wrap;

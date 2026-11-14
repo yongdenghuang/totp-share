@@ -36,6 +36,7 @@
     <tr>
       <th data-sort-type="none" style="width:36px" title="拖拽排序"></th>
       <th data-sort-type="string">名称</th>
+      <th data-sort-type="none">账号密码</th>
       <th data-sort-type="string" class="editable-col">分组</th>
       <th data-sort-type="none" title="验证码每 30 秒更新一次">
         <div class="d-flex align-items-center gap-2">验证码
@@ -55,8 +56,13 @@
     <td class="drag-handle text-center" data-label="" title="按住拖动">⋮⋮</td>
     <td data-label="名称" title="创建于 {{ a.created_at }}" data-sort-value="{{ a.name }}">
       <span class="group-tag js-group-tag{% if not a.group_style %} d-none{% endif %}"
-            {% if a.group_style %}style="background:{{ a.group_style.color }};color:{{ a.group_style.text }}"{% endif %}>{{ a.group_name }}</span><strong>{{ a.name }}</strong>
+            {% if a.group_style %}style="background:{{ a.group_style.color }};color:{{ a.group_style.text }}"{% endif %}>{{ a.group_name }}</span><button type="button" class="name-copy js-copy-name" title="点击复制账号">{{ a.name }}</button>
       {% if a.is_duplicate %}<span class="badge bg-warning text-dark ms-1" title="有其他账号用了同样的名称">重名</span>{% endif %}
+    </td>
+
+    <td data-label="密码" class="js-pw-cell">
+      {% if a.has_password %}<button type="button" class="pw-btn js-copy-pw" title="点击复制密码">••••••••</button>
+      {% else %}<button type="button" class="pw-btn empty js-change-pw" title="还没保存密码，点一下设置">设置密码</button>{% endif %}
     </td>
 
     <td class="editable" data-label="分组" data-field="group_name"
@@ -95,7 +101,7 @@
      </form>
     </td>
    </tr>
-  {% else %}<tr><td colspan="7" class="text-center text-muted py-5">还没有账号，点右上角"+ 添加账号"开始。</td></tr>
+  {% else %}<tr><td colspan="8" class="text-center text-muted py-5">还没有账号，点右上角"+ 添加账号"开始。</td></tr>
   {% endfor %}
   </tbody></table></div>
   <div class="text-center text-muted py-4 d-none" id="noMatch">没有符合条件的账号。</div>
@@ -192,6 +198,14 @@
   #groupChips .btn.drop-after { box-shadow: 3px 0 0 0 var(--bs-primary); }
 
   /* 验证码 */
+  /* 点一下复制：账号名、账号密码 */
+  .name-copy { border: 0; background: transparent; padding: 0; font: inherit; font-weight: 700; color: inherit; cursor: copy; text-align: left; }
+  .name-copy:hover { color: var(--accent, #4f46e5); text-decoration: underline dotted; text-underline-offset: 3px; }
+  .pw-btn { border: 1px solid var(--line2, #d2d6e2); background: var(--panel, #fff); color: var(--text, #141826); border-radius: 8px; padding: .15rem .6rem;
+            font-family: ui-monospace, Menlo, monospace; letter-spacing: .08em; white-space: nowrap; cursor: copy; }
+  .pw-btn:hover { border-color: var(--accent, #4f46e5); color: var(--accent, #4f46e5); background: var(--accent-bg, #eef0ff); }
+  .pw-btn.empty { font-family: inherit; letter-spacing: 0; color: var(--text3, #9aa1b5); border-style: dashed; cursor: pointer; font-size: .85rem; }
+  .copied-flash { color: var(--good, #0a8558) !important; border-color: transparent !important; background: var(--good-bg, #e2f6ed) !important; text-decoration: none !important; }
   .code-btn {
     font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 1.15rem;
     letter-spacing: .08em; color: #0d6efd; background: #f1f6ff; border: 1px solid #d6e4ff;
@@ -348,6 +362,32 @@
     }
     return textPromise.then(copyToClipboard);
   }
+
+  // ===== 点账号名、账号密码复制 =====
+  function flashCopied(el){
+    if (el.dataset.orig != null) return;
+    el.dataset.orig = el.textContent; el.textContent = '已复制'; el.classList.add('copied-flash');
+    setTimeout(function(){ el.textContent = el.dataset.orig; delete el.dataset.orig; el.classList.remove('copied-flash'); }, 900);
+  }
+  tbody.addEventListener('click', function(e){
+    var nameBtn = e.target.closest('.js-copy-name');
+    if (nameBtn) {
+      copyToClipboard(nameBtn.closest('tr').dataset.name).then(function(){ flashCopied(nameBtn); },
+        function(err){ showStatus('✗ 复制失败：' + err.message, 'error'); });
+      return;
+    }
+    var pwBtn = e.target.closest('.js-copy-pw');
+    if (pwBtn) {
+      // 密码不放在页面里，点的时候才向服务器取
+      var pw = postJSON('/admin/accounts/' + pwBtn.closest('tr').dataset.id + '/password/reveal').then(function(resp){
+        if (!(resp.data && resp.data.ok)) throw new Error((resp.data && resp.data.error) || ('HTTP ' + resp.status));
+        if (!resp.data.password) throw new Error('这个账号还没保存密码');
+        return resp.data.password;
+      });
+      copyWhenReady(pw).then(function(){ flashCopied(pwBtn); },
+        function(err){ showStatus('✗ 复制失败：' + err.message, 'error'); });
+    }
+  });
 
   // ===== 实时验证码 =====
   var codeUrl = '{{ url_for("admin_codes") }}';
@@ -679,7 +719,7 @@
     var handler = function(forced){
       var cur = th.getAttribute('aria-sort');
       var next = typeof forced === 'string' ? forced : cur==='none' ? 'ascending' : (cur==='ascending' ? 'descending' : 'none');
-      if (typeof forced !== 'string') saveView({ sortCol: next === 'none' ? null : colIdx, sortDir: next });
+      if (typeof forced !== 'string') saveView({ sortCol: next === 'none' ? null : colIdx, sortName: next === 'none' ? null : th.textContent.trim(), sortDir: next });
       Array.prototype.forEach.call(headers, function(h){
         if(h!==th && h.dataset.sortType && h.dataset.sortType!=='none'){
           h.setAttribute('aria-sort','none');
@@ -707,10 +747,10 @@
     });
   });
   // 恢复上次的排序
-  if (savedView.sortCol != null && headers[savedView.sortCol] && headers[savedView.sortCol]._sortTo &&
-      (savedView.sortDir === 'ascending' || savedView.sortDir === 'descending')) {
-    headers[savedView.sortCol]._sortTo(savedView.sortDir);
-  }
+  var sortTh = savedView.sortName ? Array.prototype.find.call(headers, function(h){ return h.textContent.trim() === savedView.sortName; })
+             : savedView.sortCol === 2 ? Array.prototype.find.call(headers, function(h){ return h.textContent.trim() === '分组'; })   // 加列之前存的“分组”
+             : headers[savedView.sortCol];
+  if (sortTh && sortTh._sortTo && (savedView.sortDir === 'ascending' || savedView.sortDir === 'descending')) sortTh._sortTo(savedView.sortDir);
   if (btnReset) {
     btnReset.addEventListener('click', function(){
       saveView({ sortCol: null, sortDir: 'none' });
@@ -912,6 +952,8 @@
         copyInfoBtn.classList.remove('d-none');
         var info = row.querySelector('.js-copy-info');
         if (info) info.title = '复制分组、账号、密码和验证码链接';
+        var pwCell = row.querySelector('.js-pw-cell');
+        if (pwCell && !pwCell.querySelector('.js-copy-pw')) pwCell.innerHTML = '<button type="button" class="pw-btn js-copy-pw" title="点击复制密码">••••••••</button>';
         refreshButtons();
         return value;
       });

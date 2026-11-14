@@ -184,7 +184,7 @@ def test_dashboard_shows_colored_group_tag_before_name(ctx):
     post(c, "/admin/groups", data={"action": "rename", "old_name": "plus", "name": "plus", "color": "#ffee00"})
     html = get(c, "/admin/dashboard").get_data(as_text=True)
     # 亮黄底配深色字；标签紧挨在名称前面
-    assert 'style="background:#ffee00;color:#1f2937">plus</span><strong>plus-01</strong>' in html
+    assert 'style="background:#ffee00;color:#1f2937">plus</span><button type="button" class="name-copy js-copy-name" title="点击复制账号">plus-01</button>' in html
     # 没分组的账号：标签占位但隐藏
     assert 'js-group-tag d-none"' in html
     # 倒计时在「验证码」表头里
@@ -482,3 +482,15 @@ def test_edit_form_also_keeps_previous_password(ctx):
     # 只改别的字段、密码没动：两份都保持原样
     post(c, "/admin/accounts/1/edit", data={"name": "plus-01-renamed", "account_password": "new-one"})
     assert post(c, "/admin/accounts/1/password/reveal", json={}).get_json()["previous"] == "old-one"
+
+
+def test_dashboard_password_column_never_contains_the_password(ctx):
+    c = ctx.admin()
+    aid = ctx.sql("SELECT id FROM accounts WHERE name='plus-01'")[0]["id"]
+    assert post(c, f"/admin/accounts/{aid}/password", json={"password": "Secret-PW-123"}).get_json()["ok"]
+    html = get(c, "/admin/dashboard").get_data(as_text=True)
+    assert "Secret-PW-123" not in html                    # 密码不放进页面，点击时才取
+    assert html.count("js-copy-pw") >= 1 and "设置密码" in html   # 有密码的显示可复制，没密码的显示“设置密码”
+    assert "js-copy-name" in html
+    r = post(c, f"/admin/accounts/{aid}/password/reveal")
+    assert r.get_json()["password"] == "Secret-PW-123"

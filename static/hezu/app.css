@@ -308,3 +308,11 @@ tr:hover .cf-edit, .cf-edit:focus-visible { opacity: 1; }
 table.grid th.c { text-align: center; }
 .cell.center { text-align: center; font-variant-numeric: tabular-nums; }
 table.grid.unitsheet .cell.strong { font-size: 14.5px; }
+/* 账号名、账号密码：点一下复制 */
+.cf-val.plain { border-color: transparent; background: transparent; font-weight: 650; font-size: 14px; padding: 5px 8px; }
+.cf-val.plain:hover { background: var(--accent-bg); border-color: transparent; color: var(--accent); }
+.cf-val.empty { font-family: var(--font); letter-spacing: 0; color: var(--text3); border-style: dashed; cursor: pointer; font-size: 13px; }
+.cf-val.empty:hover { color: var(--accent); }
+.acct .cf { flex: 1; }
+.pwform { width: 280px; }
+.muted.small { font-size: 12px; }
