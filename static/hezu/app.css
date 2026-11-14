@@ -316,3 +316,14 @@ table.grid.unitsheet .cell.strong { font-size: 14.5px; }
 .acct .cf { flex: 1; }
 .pwform { width: 280px; }
 .muted.small { font-size: 12px; }
+/* 支付卡页：哪些账号在用这张卡 */
+.usage.has-usage { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; border-radius: 4px; }
+.usage.has-usage:hover, .usage.has-usage:focus-visible { color: var(--accent); }
+.usage-pop { min-width: 300px; max-width: 420px; max-height: 360px; overflow-y: auto; }
+.usage-item { display: grid !important; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.usage-where { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text2); white-space: nowrap; }
+.usage-acct { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-cost { font-variant-numeric: tabular-nums; color: var(--text2); font-size: 13px; }
+.usage-head { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 10px; padding: 4px 10px 2px; font-size: 11.5px; color: var(--text3); border-bottom: 1px solid var(--line); margin-bottom: 2px; }
+.usage-item { grid-template-columns: 120px minmax(0, 1fr) auto !important; }
+.usage-where { overflow: hidden; text-overflow: ellipsis; }

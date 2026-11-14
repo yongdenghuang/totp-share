@@ -1271,6 +1271,49 @@
     for (const ym in S.months) for (const sh of S.sheets) for (const r of S.months[ym].rows[sh.id]) if (test(r)) n++;
     return n;
   }
+  // 这张卡（或这一类卡）这个月被哪些账号用着：鼠标停上去显示，也可以点一下（手机上用）
+  function accountsUsing(filter) {
+    const out = [];
+    for (const sh of S.sheets) for (const r of S.months[view.month].rows[sh.id] || []) {
+      if (filter.cardId ? r.cardId !== filter.cardId : r.issuerId !== filter.issuerId) continue;
+      const g = sh.grouped ? G.find(x => x.id === r.group) : null;
+      out.push({ sheet: sh, row: r, where: sh.grouped ? sh.name + ' · ' + (g ? g.name : '未分组') : sh.name, color: g ? g.color : null, cost: rowCost(sh, r) });
+    }
+    return out;
+  }
+  let usageTimer = null;
+  function usageLink(el, filter, title) {
+    const list = accountsUsing(filter);
+    if (!list.length) return el;
+    el.classList.add('has-usage');
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+    const show = () => {
+      clearTimeout(usageTimer);
+      if (pop && pop.anchor === el) return;
+      const box = openPop(el, [
+        h('div', { class: 'label', text: title + ' · ' + ymLabel(view.month) + ' · ' + list.length + ' 个账号' }),
+        h('div', { class: 'usage-head' }, h('span', { text: '种类' }), h('span', { text: '账号' }), h('span', { text: '价格' })),
+        list.map(x => h('button', { class: 'item usage-item', type: 'button', title: '去这个账号', onclick: () => {
+          closePop(); view.tab = x.sheet.id; view.q = x.row.account; view.gfilter = null; render();
+          const tr = document.querySelector('[data-row="' + x.row.id + '"]'); if (tr) tr.scrollIntoView({ block: 'center' });
+        } },
+          h('span', { class: 'usage-where' }, x.color ? h('span', { class: 'gdot', style: 'background:' + x.color }) : null, x.where),
+          h('span', { class: 'usage-acct', text: x.row.account || '未填账号' }),
+          h('span', { class: 'usage-cost', text: money(x.cost) }))),
+      ]);
+      box.classList.add('usage-pop');
+      pop.anchor = el;
+      box.addEventListener('mouseenter', () => clearTimeout(usageTimer));
+      box.addEventListener('mouseleave', hide);
+    };
+    const hide = () => { clearTimeout(usageTimer); usageTimer = setTimeout(() => { if (pop && pop.anchor === el) closePop(); }, 250); };
+    el.addEventListener('mouseenter', () => { clearTimeout(usageTimer); usageTimer = setTimeout(show, 150); });
+    el.addEventListener('mouseleave', hide);
+    el.addEventListener('click', e => { e.stopPropagation(); if (pop && pop.anchor === el) closePop(); else show(); });
+    el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(); } });
+    return el;
+  }
   function cardsView() {
     countryList();
     const cs = cardStats(view.month);
@@ -1291,13 +1334,13 @@
               S.issuers.splice(S.issuers.indexOf(it), 1); normalize(); touch(); render();
             }
           } }]) }, icon('more'))),
-        h('div', { class: 'issuer-meta' }, h('span', null, ymLabel(view.month) + ' 续费 ', h('b', { text: money(st.cost) })), h('span', null, h('b', { text: String(st.n) }), ' 个账号在用'), h('span', null, h('b', { text: String(own.length) }), ' 个卡号')),
+        h('div', { class: 'issuer-meta' }, h('span', null, ymLabel(view.month) + ' 续费 ', h('b', { text: money(st.cost) })), usageLink(h('span', { class: 'usage' }, h('b', { text: String(st.n) }), ' 个账号在用'), { issuerId: it.id }, it.name), h('span', null, h('b', { text: String(own.length) }), ' 个卡号')),
         own.map(c => {
           const s = cs.byCard[c.id] || { n: 0, cost: 0 };
           return h('div', { class: 'cardrow' },
             cell(c, 'number', { mask: 'card', cls: 'mono', placeholder: '卡号', title: '点一下显示完整卡号', label: '卡号' }),
             cell(c, 'note', { placeholder: '备注', label: '卡备注' }),
-            h('div', { class: 'spend' }, money(s.cost), h('small', { text: s.n + ' 个账号' })),
+            h('div', { class: 'spend' }, money(s.cost), usageLink(h('small', { class: 'usage', text: s.n + ' 个账号' }), { cardId: c.id }, it.name + ' ' + cardLabel(c))),
             h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '删除卡号', title: '删除卡号', onclick: async () => {
               const used = usageCount(r => r.cardId === c.id);
               if (await confirmBox('删除卡号', '删除 ' + it.name + ' 的 ' + cardLabel(c) + '？' + (used ? '\n有 ' + used + ' 个账号（含历史月份）选了它，删除后会变成“不指定卡号”。' : ''), '删除', true)) {
