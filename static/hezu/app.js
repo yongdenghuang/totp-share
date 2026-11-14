@@ -32,6 +32,9 @@
   const API = '/admin/hezu/api';
   const codes = { map: {}, until: 0, period: 30, timer: null, els: [], timers: [] };   // 当前验证码，只显示不保存
   const view = { tab: 'home', month: null, unlocked: {}, q: '', country: '', gfilter: null };   // gfilter: null = 全部，'__loose' = 未分组，否则分组 id
+  // 上次的分组筛选、国家筛选记在浏览器里，刷新后还是那样
+  try { const v = JSON.parse(localStorage.getItem('hezu-view') || '{}') || {}; if ('gfilter' in v) view.gfilter = v.gfilter; if (typeof v.country === 'string') view.country = v.country; } catch (e) { /* 忽略 */ }
+  function saveView() { try { localStorage.setItem('hezu-view', JSON.stringify({ gfilter: view.gfilter, country: view.country })); } catch (e) { /* 忽略 */ } }
   let updaters = [];                  // 改数字后需要刷新的合计
   let searchRows = [];                // 当前页面可被搜索过滤的行
   let dirty = false, saving = false, saveTimer = null, statusEl = null;
@@ -1799,6 +1802,7 @@
   }
   function render() {
     closePop(); updaters = []; searchRows = []; codes.els = []; codes.timers = [];
+    saveView();
     if (location.hash.slice(1) !== view.tab && !location.search) history.replaceState(null, '', '#' + view.tab);
     const M = S.months[view.month], keys = monthKeys(), isLatest = view.month === keys[keys.length - 1], i = keys.indexOf(view.month);
     const go = ym => { view.month = ym; render(); };

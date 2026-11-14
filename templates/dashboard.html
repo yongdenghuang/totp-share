@@ -534,7 +534,15 @@
   }
   var groupsUrl = '{{ url_for("groups_page") }}';
   var UNGROUPED = '\u0000ungrouped';
-  var activeGroup = null;   // null = 全部
+  // 上次的排序和分组筛选记在浏览器里，刷新后还是那样
+  var VIEW_KEY = 'totp-list-view';
+  var savedView = {};
+  try { savedView = JSON.parse(localStorage.getItem(VIEW_KEY) || '{}') || {}; } catch (e) { savedView = {}; }
+  function saveView(patch) {
+    for (var k in patch) savedView[k] = patch[k];
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify(savedView)); } catch (e) { /* 浏览器不让存就算了 */ }
+  }
+  var activeGroup = savedView.group === undefined ? null : savedView.group;   // null = 全部
 
   function applyFilter(){
     var q = searchBox.value.trim().toLocaleLowerCase();
@@ -559,7 +567,7 @@
       var g = row.dataset.group || '';
       if (g) counts[g] = (counts[g] || 0) + 1; else ungrouped++;
     });
-    if (activeGroup === UNGROUPED && !ungrouped) activeGroup = null;
+    if (activeGroup === UNGROUPED ? !ungrouped : activeGroup !== null && allGroups.indexOf(activeGroup) < 0) activeGroup = null;
 
     chipsEl.textContent = '';
     var manage = document.createElement('a');
@@ -581,7 +589,7 @@
         b.appendChild(dot);
       }
       b.appendChild(document.createTextNode(label + ' ' + n));
-      b.addEventListener('click', function(){ activeGroup = value; renderChips(); applyFilter(); });
+      b.addEventListener('click', function(){ activeGroup = value; saveView({ group: value }); renderChips(); applyFilter(); });
       if (typeof value === 'string' && groupMeta.hasOwnProperty(value)) makeChipDraggable(b, value);
       chipsEl.appendChild(b);
     }
@@ -668,9 +676,10 @@
     th.setAttribute('role','button');
     th.setAttribute('tabindex','0');
     th.setAttribute('aria-sort','none');
-    var handler = function(){
+    var handler = function(forced){
       var cur = th.getAttribute('aria-sort');
-      var next = cur==='none' ? 'ascending' : (cur==='ascending' ? 'descending' : 'none');
+      var next = typeof forced === 'string' ? forced : cur==='none' ? 'ascending' : (cur==='ascending' ? 'descending' : 'none');
+      if (typeof forced !== 'string') saveView({ sortCol: next === 'none' ? null : colIdx, sortDir: next });
       Array.prototype.forEach.call(headers, function(h){
         if(h!==th && h.dataset.sortType && h.dataset.sortType!=='none'){
           h.setAttribute('aria-sort','none');
@@ -691,13 +700,20 @@
         tbody.appendChild(frag);
       }
     };
-    th.addEventListener('click', handler);
+    th.addEventListener('click', function(){ handler(); });
+    th._sortTo = handler;
     th.addEventListener('keydown', function(e){
       if(e.key==='Enter' || e.key===' '){ e.preventDefault(); handler(); }
     });
   });
+  // 恢复上次的排序
+  if (savedView.sortCol != null && headers[savedView.sortCol] && headers[savedView.sortCol]._sortTo &&
+      (savedView.sortDir === 'ascending' || savedView.sortDir === 'descending')) {
+    headers[savedView.sortCol]._sortTo(savedView.sortDir);
+  }
   if (btnReset) {
     btnReset.addEventListener('click', function(){
+      saveView({ sortCol: null, sortDir: 'none' });
       clearSortArrows(); applyDefaultOrder();
       showStatus('已恢复保存的顺序', 'success');
     });
