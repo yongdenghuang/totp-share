@@ -7,10 +7,12 @@
 由 app.py 末尾调用 install() 接入；这里不直接 import app，避免循环引用。
 """
 import json
+import os
 import zlib
 from datetime import datetime, timedelta
 
-from flask import jsonify, render_template, request
+import pyotp
+from flask import jsonify, render_template, request, url_for
 from flask_wtf.csrf import generate_csrf
 
 import hezu_xlsx
@@ -107,6 +109,32 @@ def context():
     return {"groups": groups, "accounts": accounts}
 
 
+def shell_nav():
+    """验证码各页的左侧导航和账本页是同一套，这里给模板提供账本那几项的名字和数量。"""
+    try:
+        state = load_state()[1]
+    except Exception:          # 账本读不出来也不能让验证码页面打不开
+        state = default_state()
+    months = sorted(k for k, v in state.get("months", {}).items() if isinstance(v, dict))
+    rows = (state["months"][months[-1]].get("rows") or {}) if months else {}
+    sheets = [{"id": str(s["id"]), "name": str(s.get("name") or ""), "grouped": bool(s.get("grouped")),
+               "count": len(rows.get(s["id"]) or [])}
+              for s in state.get("sheets", []) if isinstance(s, dict) and s.get("id")]
+    accounts = _core.query_one("SELECT COUNT(*) AS n FROM accounts")["n"]
+    return {"sheets": sheets, "cards": len(state.get("cards") or []),
+            "vps": len(state.get("vps") or []), "accounts": accounts}
+
+
+def static_url(filename):
+    """静态文件地址带上修改时间，更新代码后浏览器不会继续用旧的脚本和样式。"""
+    path = os.path.join(_core.app.static_folder, filename)
+    try:
+        version = int(os.path.getmtime(path))
+    except OSError:
+        version = 0
+    return url_for("static", filename=filename, v=version)
+
+
 def payload(rev, state):
     return dict(ok=True, rev=rev, state=state, csrf=generate_csrf(), **context())
 
@@ -139,6 +167,12 @@ def install(core):
     global _core
     _core = core
     app, limiter, login_required = core.app, core.limiter, core.login_required
+    @app.context_processor
+    def shell_helpers():
+        # 用 context_processor 而不是直接改 jinja_env：后者会过早创建模板环境，
+        # dev/run.py 里之后才设置的 TEMPLATES_AUTO_RELOAD 就不生效了
+        return {"hz_nav": shell_nav, "hz_static": static_url}
+
     api_limit = limiter.limit("240 per minute")   # 账本边改边自动保存，不能用全站默认的每小时 300 次
 
     def raise_body_limit():
@@ -193,6 +227,34 @@ def install(core):
         except ValueError as e:
             return jsonify(ok=False, error=str(e)), 400
         return jsonify(ok=True, name=name, **context())
+
+    @app.route(API_PREFIX + "accounts", methods=["POST"])
+    @api_limit
+    @login_required
+    def hezu_account_create():
+        """统一的「添加账号」入口填了 TOTP 密钥时，在这里建验证码账号。
+        校验规则和验证码后台原来的添加表单一致；账本那一行由页面随后自己保存。"""
+        data = read_json() or {}
+        name = str(data.get("name") or "").strip()[:100]
+        if not name:
+            return jsonify(ok=False, error="请填写账号名称"), 400
+        try:
+            secret = core.validate_base32(str(data.get("secret") or ""))
+            pyotp.TOTP(secret).now()
+            password = core.parse_account_password(str(data.get("password") or ""))
+            group = core.resolve_group(str(data.get("group") or ""))
+        except ValueError as e:
+            return jsonify(ok=False, error=str(e)), 400
+        dups = core.find_same_name(name)
+        if dups and not data.get("confirmDuplicate"):
+            return jsonify(ok=False, duplicate=True,
+                           error=f"验证码账号里已经有 {len(dups)} 个叫「{dups[0]['name']}」的账号。"), 409
+        token = core.new_token()
+        aid = core.execute(
+            """INSERT INTO accounts(name, secret_encrypted, url_token, url_token_hash,
+                                    group_name, password_encrypted) VALUES (?,?,?,?,?,?)""",
+            (name, core.encrypt_secret(secret), token, core.hash_token(token), group, password))
+        return jsonify(ok=True, id=aid, **context())
 
     @app.route(API_PREFIX + "import", methods=["POST"])
     @api_limit

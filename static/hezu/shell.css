@@ -1,0 +1,96 @@
+/* 整个后台共用的外壳：配色变量、左侧导航。合租账本页和验证码各页都引用这一份。
+   所有规则都限定在 .side / .shell / body.hz 之下，和 Bootstrap 的同名类（.nav、.btn）互不影响。 */
+:root {
+  --bg: #f3f4f8; --panel: #ffffff; --line: #e7e9f0; --line2: #d2d6e2; --hover: #f5f6fb; --head: #fafbfd;
+  --text: #141826; --text2: #5a6379; --text3: #9aa1b5;
+  --accent: #4f46e5; --accent-bg: #eef0ff; --on-accent: #ffffff;
+  --good: #0a8558; --good-bg: #e2f6ed; --bad: #d32f4c; --bad-bg: #fdebef; --warn: #ad5f03; --warn-bg: #fff2d9;
+  --side: #121629; --side-line: #232845; --side-text: #aab1cb; --side-hover: #1c2140; --side-on: #2a3060;
+  --shadow: 0 1px 2px rgba(18, 24, 44, .04), 0 2px 8px rgba(18, 24, 44, .05);
+  --shadow-pop: 0 12px 32px rgba(18, 24, 44, .18);
+  --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d0f16; --panel: #161924; --line: #252a39; --line2: #363c50; --hover: #1c2030; --head: #1a1d2a;
+    --text: #e9ebf3; --text2: #a4acc2; --text3: #6c7590;
+    --accent: #8f90fa; --accent-bg: #22244a; --on-accent: #10122b;
+    --good: #55d3a5; --good-bg: #11322a; --bad: #ff8399; --bad-bg: #3d1823; --warn: #f1b655; --warn-bg: #3a2c0f;
+    --side: #090b12; --side-line: #1b1f2e; --side-text: #969db6; --side-hover: #151929; --side-on: #20254a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3); --shadow-pop: 0 12px 32px rgba(0, 0, 0, .5);
+  }
+}
+
+.shell { display: grid; grid-template-columns: 208px minmax(0, 1fr); min-height: 100vh; }
+.main { min-width: 0; }
+.side { background: var(--side); color: var(--side-text); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; padding: 16px 10px 12px; gap: 2px; overflow-y: auto; font: 14px/1.5 var(--font); }
+.side .brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 16px; color: #fff; font-weight: 650; font-size: 16px; }
+.logo { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, #6d6bf7, #a855f7); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 15px; font-weight: 700; flex: none; }
+.side .nav-label { font-size: 11px; letter-spacing: .06em; color: #6b7391; padding: 14px 10px 5px; }
+.side .nav { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; width: 100%; margin: 0; border: 0; background: transparent; color: var(--side-text); padding: 8px 10px; border-radius: 9px; text-align: left; white-space: nowrap; text-decoration: none; font: inherit; cursor: pointer; }
+.side .nav:hover { background: var(--side-hover); color: #fff; }
+.side .nav.on { background: var(--side-on); color: #fff; font-weight: 600; }
+.side .nav .count { margin-left: auto; font-size: 12px; opacity: .6; font-variant-numeric: tabular-nums; }
+.side .nav svg { flex: none; }
+.side .side-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--side-line); display: grid; gap: 4px; }
+.side .side-foot form { margin: 0; }
+.side .status { font-size: 12px; color: #6b7391; padding: 2px 10px; white-space: nowrap; }
+.side .status.err { color: #ff8399; }
+@media (max-width: 880px) {
+  .shell { display: block; }
+  .side { z-index: 6; height: auto; flex-direction: row; align-items: center; padding: 8px 10px; overflow-x: auto; gap: 4px; }
+  .side .brand { padding: 0 8px 0 4px; } .side .brand span { display: none; }
+  .side .nav-label { display: none; } .side .nav { width: auto; padding: 7px 11px; } .side .nav .count { display: none; }
+  .side .side-foot { margin: 0 0 0 auto; padding: 0; border: 0; display: flex; align-items: center; }
+  .side .status { display: none; }
+}
+
+/* —— 验证码各页（Bootstrap）套进同一外壳后的配色，和账本页保持一致 —— */
+body.hz {
+  margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; -webkit-font-smoothing: antialiased;
+  --bs-body-bg: var(--bg); --bs-body-color: var(--text); --bs-body-font-size: 14px; --bs-secondary-color: var(--text2);
+  --bs-primary: #4f46e5; --bs-primary-rgb: 79, 70, 229; --bs-link-color: var(--accent); --bs-link-color-rgb: 79, 70, 229;
+  --bs-link-hover-color: var(--accent); --bs-link-hover-color-rgb: 67, 56, 202; --bs-border-color: var(--line2); --bs-border-radius: 9px;
+  --bs-tertiary-bg: var(--head); --bs-emphasis-color: var(--text);
+}
+body.hz .hz-page { padding: 20px 22px 70px; max-width: 1560px; }
+body.hz.hz-login { display: block; }
+body.hz h4 { font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+body.hz h5, body.hz h6 { font-weight: 650; }
+body.hz .text-muted { color: var(--text2) !important; }
+body.hz .card { border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); background: var(--panel); color: var(--text); --bs-card-bg: var(--panel); }
+body.hz .btn { --bs-btn-border-radius: 9px; --bs-btn-font-size: 14px; font-weight: 500; }
+body.hz .btn-sm { --bs-btn-border-radius: 8px; --bs-btn-font-size: 13px; }
+body.hz .btn-primary { --bs-btn-color: var(--on-accent); --bs-btn-bg: var(--accent); --bs-btn-border-color: var(--accent); --bs-btn-hover-color: var(--on-accent); --bs-btn-hover-bg: var(--accent); --bs-btn-hover-border-color: var(--accent);
+  --bs-btn-active-color: var(--on-accent); --bs-btn-active-bg: var(--accent); --bs-btn-active-border-color: var(--accent); --bs-btn-disabled-bg: var(--accent); --bs-btn-disabled-border-color: var(--accent); --bs-btn-focus-shadow-rgb: 79, 70, 229; }
+body.hz .btn-primary:hover { filter: brightness(1.1); }
+body.hz .btn-outline-primary { --bs-btn-color: var(--accent); --bs-btn-border-color: var(--accent); --bs-btn-hover-color: var(--on-accent); --bs-btn-hover-bg: var(--accent); --bs-btn-hover-border-color: var(--accent);
+  --bs-btn-active-color: var(--on-accent); --bs-btn-active-bg: var(--accent); --bs-btn-active-border-color: var(--accent); --bs-btn-focus-shadow-rgb: 79, 70, 229; }
+body.hz .btn-outline-secondary, body.hz .btn-light { --bs-btn-color: var(--text); --bs-btn-bg: var(--panel); --bs-btn-border-color: var(--line2); --bs-btn-hover-color: var(--text); --bs-btn-hover-bg: var(--hover); --bs-btn-hover-border-color: var(--text3);
+  --bs-btn-active-color: var(--text); --bs-btn-active-bg: var(--hover); --bs-btn-active-border-color: var(--text3); }
+body.hz .form-control, body.hz .form-select { border-radius: 9px; border-color: var(--line2); background-color: var(--panel); color: var(--text); font-size: 14px; }
+body.hz .form-control:focus, body.hz .form-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+body.hz .form-check-input:checked { background-color: var(--accent); border-color: var(--accent); }
+body.hz .table { --bs-table-bg: transparent; --bs-table-color: var(--text); --bs-table-border-color: var(--line); --bs-table-hover-bg: var(--hover); --bs-table-hover-color: var(--text); font-size: 13.5px; margin-bottom: 0; }
+body.hz .table thead th { font-weight: 500; color: var(--text3); font-size: 12px; background: var(--head); border-bottom-color: var(--line); }
+body.hz .table-light { --bs-table-bg: var(--head); --bs-table-color: var(--text3); --bs-table-border-color: var(--line); }
+body.hz .progress { background: var(--hover); }
+body.hz .progress-bar { background-color: var(--accent); }
+body.hz .text-primary { color: var(--accent) !important; }
+body.hz .bg-primary { background-color: var(--accent) !important; }
+body.hz .modal-content, body.hz .dropdown-menu { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-pop); }
+body.hz .alert { border-radius: 12px; }
+body.hz .code-btn { color: var(--accent); background: var(--accent-bg); border-color: transparent; }
+body.hz .code-btn:hover:not(:disabled) { background: var(--accent-bg); filter: brightness(.97); }
+body.hz .drag-handle:hover { color: var(--accent); }
+body.hz .table-sortable th.editable-col { background: var(--head); }
+body.hz td.editable:hover { background: var(--hover); }
+body.hz tr.sortable-drag { background: var(--panel); }
+@media (max-width: 880px) { body.hz .hz-page { padding: 14px 14px 60px; } }
+@media (prefers-color-scheme: dark) {
+  body.hz .code-btn:disabled { color: var(--text3); background: var(--hover); border-color: transparent; }
+  body.hz .code-btn.expiring { color: var(--bad); background: var(--bad-bg); border-color: transparent; }
+  body.hz .code-btn.copied { color: var(--good); background: var(--good-bg); border-color: transparent; }
+  body.hz tr.sortable-ghost { background: var(--accent-bg); } body.hz tr.sortable-chosen { background: var(--warn-bg); }
+  body.hz .group-dot { box-shadow: none; }
+}

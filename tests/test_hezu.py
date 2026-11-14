@@ -242,3 +242,80 @@ def test_excel_import_parses_without_saving(ctx):
     assert [m["amount"] for m in row["members"]] == [900, 50, 30]
     assert ctx.sql("SELECT COUNT(*) AS n FROM hezu_state")[0]["n"] == 0
     assert call(c, "post", f"{API}/import", data=b"not a spreadsheet").status_code == 400
+
+
+# ---------- 统一的「添加账号」入口 ----------
+def test_add_account_creates_totp_account(ctx):
+    import pyotp
+    c = ctx.admin()
+    call(c, "post", f"{API}/groups", json={"name": "GPT Plus"})
+    secret = pyotp.random_base32()
+    r = call(c, "post", f"{API}/accounts", json={"name": " new-01@example.com ", "secret": secret.lower(),
+                                                 "password": "pw-123", "group": "gpt plus"})
+    d = r.get_json()
+    assert r.status_code == 200 and d["ok"] and isinstance(d["id"], int)
+    mine = [a for a in d["accounts"] if a["id"] == d["id"]][0]
+    assert mine == {"id": d["id"], "name": "new-01@example.com", "group": "GPT Plus", "hasPassword": True}
+    assert secret not in r.get_data(as_text=True) and "pw-123" not in r.get_data(as_text=True)
+    # 验证码立刻能用，分享链接也生成了，密钥和密码在库里是密文
+    codes = call(c, "get", "/admin/codes").get_json()["codes"]
+    assert codes[str(d["id"])] == pyotp.TOTP(secret).now()
+    row = ctx.sql("SELECT * FROM accounts WHERE id=?", (d["id"],))[0]
+    assert row["url_token"] and secret.encode() not in bytes(row["secret_encrypted"])
+    assert b"pw-123" not in bytes(row["password_encrypted"])
+    assert call(ctx.client(), "get", "/t/" + row["url_token"]).status_code == 200
+
+
+def test_add_account_validation_and_duplicates(ctx):
+    import pyotp
+    c = ctx.admin()
+    good = pyotp.random_base32()
+    before = ctx.sql("SELECT COUNT(*) AS n FROM accounts")[0]["n"]
+    for bad in ({"name": "", "secret": good}, {"name": "x", "secret": ""}, {"name": "x", "secret": "not base32!"},
+                {"name": "x", "secret": good, "group": "没有这个分组"}, {"name": "x", "secret": good, "password": "p" * 300}):
+        assert call(c, "post", f"{API}/accounts", json=bad).status_code == 400
+    r = call(c, "post", f"{API}/accounts", json={"name": "PLUS-01", "secret": good})     # 夹具里已有 plus-01
+    assert r.status_code == 409 and r.get_json()["duplicate"] is True
+    assert ctx.sql("SELECT COUNT(*) AS n FROM accounts")[0]["n"] == before
+    r = call(c, "post", f"{API}/accounts", json={"name": "PLUS-01", "secret": good, "confirmDuplicate": True})
+    assert r.status_code == 200 and ctx.sql("SELECT COUNT(*) AS n FROM accounts")[0]["n"] == before + 1
+    assert call(ctx.client(), "post", f"{API}/accounts", json={"name": "x", "secret": good}).status_code == 401
+
+
+def test_dashboard_add_button_points_to_unified_entry(ctx):
+    html = call(ctx.admin(), "get", "/admin/dashboard").get_data(as_text=True)
+    assert 'href="/admin/hezu?add=1"' in html
+    # 原来的添加表单还在：账本里给已有的行补建验证码账号时会用到
+    assert call(ctx.admin(), "get", "/admin/accounts/new").status_code == 200
+
+
+# ---------- 整个后台共用一个外壳 ----------
+def test_totp_pages_share_the_ledger_sidebar(ctx):
+    c = ctx.admin()
+    state = sample_state()
+    state["sheets"].append({"id": "s_<x>", "name": "油管 & 会员", "mode": "unit"})
+    save(c, state, 0)
+    for path, active in (("/admin/dashboard", "验证码账号"), ("/admin/logs", "访问记录"),
+                         ("/admin/settings", "设置"), ("/admin/groups", "验证码账号"),
+                         ("/admin/accounts/new", "验证码账号")):
+        html = call(c, "get", path).get_data(as_text=True)
+        assert 'class="side"' in html and "hezu/shell.css" in html and "navbar" not in html
+        assert 'href="/admin/hezu#ai"' in html and 'href="/admin/hezu#cards"' in html
+        assert "油管 &amp; 会员" in html and 'href="/admin/hezu#s_&lt;x&gt;"' in html      # 表名、编号都转义
+        on = html.split('class="nav on"', 1)[1].split("</a>", 1)[0]
+        assert active in on
+        assert html.count('class="nav on"') == 1
+    # 导航里的数量来自账本：这个月 AI 合租 1 个账号、1 张卡、1 台 VPS、2 个验证码账号
+    html = call(c, "get", "/admin/dashboard").get_data(as_text=True)
+    side = html.split('class="side"', 1)[1].split("</nav>", 1)[0]
+    counts = [x.split("<")[0] for x in side.split('class="count">')[1:]]
+    assert counts == ["1", "0", "1", "1", "2"]
+
+
+def test_public_and_login_pages_have_no_sidebar(ctx):
+    token = ctx.sql("SELECT url_token FROM accounts LIMIT 1")[0]["url_token"]
+    c = ctx.client()
+    for path in ("/admin/login", "/t/" + token):
+        html = call(c, "get", path).get_data(as_text=True)
+        assert 'class="side"' not in html and "/admin/hezu" not in html
+    assert "hezu/shell.css" not in call(c, "get", "/t/" + token).get_data(as_text=True)   # 分享页样式不变

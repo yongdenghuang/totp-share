@@ -216,9 +216,40 @@
     A.forEach(a => { const k = normName(a.name); (byName[k] = byName[k] || []).push(a); });
     for (const ym in S.months) for (const sh of S.sheets) for (const r of S.months[ym].rows[sh.id]) {
       if (r.totpId > 0 && !totpById(r.totpId)) { r.totpId = 0; n++; }
-      if (!r.totpId && r.account) { const m = byName[normName(r.account)]; if (m && m.length === 1) { r.totpId = m[0].id; n++; } }
+      if (!r.totpId && r.account) { const m = byName[normName(r.account)]; if (m && m.length === 1) { r.totpId = m[0].id; n++; onLinked(r, sh, ym); } }
+    }
+    if (pullGroups()) n++;
+    return n > 0;
+  }
+  // ---------- 分组两边保持一致 ----------
+  // 关联了验证码账号的行，分组以验证码账号为准；只动进行中的月份，存档保持当时的样子。
+  const groupIdByName = name => { const g = G.find(x => x.name === name); return g ? g.id : ''; };
+  function pullGroups() {
+    let n = 0;
+    for (const ym in S.months) if (!S.months[ym].archived) for (const sh of S.sheets) if (sh.grouped) for (const r of S.months[ym].rows[sh.id] || []) {
+      const a = r.totpId > 0 ? totpById(r.totpId) : null; if (!a) continue;
+      const gid = groupIdByName(a.group);
+      if (r.group !== gid) { r.group = gid; n++; }
     }
     return n > 0;
+  }
+  // 把验证码账号那边的分组改成 groupId 对应的分组（'' = 未分组）。先改本地再发请求，失败了下次打开会以服务器为准。
+  function pushGroup(totpId, groupId) {
+    const a = totpById(totpId), g = G.find(x => x.id === groupId); if (!a) return;
+    a.group = g ? g.name : '';
+    api('POST', '/admin/accounts/' + totpId + '/field', { field: 'group_name', value: a.group })
+      .then(r => { if (!r.ok) setStatus('验证码账号的分组没改成，请刷新页面', true); }).catch(() => setStatus('验证码账号的分组没改成，请刷新页面', true));
+  }
+  // 刚关联上的那一刻：验证码账号有分组就跟它走；它没分组而这一行有，就把这一行的分组带过去
+  function onLinked(row, sheet, ym) {
+    const a = totpById(row.totpId);
+    if (!a || !sheet.grouped || S.months[ym].archived) return;
+    if (!a.group && row.group && G.some(g => g.id === row.group)) pushGroup(a.id, row.group);
+  }
+  function moveRow(row, groupId) {
+    row.group = groupId;
+    if (row.totpId > 0 && totpById(row.totpId) && !S.months[view.month].archived) { pushGroup(row.totpId, groupId); pullGroups(); }
+    touch(); render();
   }
   function income(sheet, r) { return sheet.mode === 'members' ? r.members.reduce((a, m) => a + num(m.amount), 0) : num(r.unitPrice) * num(r.count); }
   function heads(sheet, r) { return sheet.mode === 'members' ? r.members.length : num(r.count); }
@@ -252,7 +283,7 @@
       const headers = {};
       if (method !== 'GET') headers['X-CSRFToken'] = CSRF;
       if (body != null && !raw) headers['Content-Type'] = 'application/json';
-      return fetch(API + path, { method, headers, credentials: 'same-origin', body: body == null ? undefined : raw ? body : JSON.stringify(body) });
+      return fetch(path.startsWith('/admin/') ? path : API + path, { method, headers, credentials: 'same-origin', body: body == null ? undefined : raw ? body : JSON.stringify(body) });
     };
     let r = await send();
     // 页面开久了防伪令牌会过期，重新登录后也会换：换一个新的再试一次。
@@ -327,12 +358,28 @@
   async function leave(url) { await settle(); location.href = url; }
   window.addEventListener('beforeunload', e => { if (dirty || saving) { e.preventDefault(); e.returnValue = ''; } });
 
-  function adopt(d) { useContext(d); S = d.state; S.rev = d.rev; dirty = false; normalize(); render(); pollCodes(); }
+  // 从验证码各页的导航点过来时，地址里带着要看的分页（#ai、#cards……）
+  function tabFromHash() {
+    let t = ''; try { t = decodeURIComponent(location.hash.slice(1)); } catch (e) { t = ''; }
+    if (t === 'new-sheet') { history.replaceState(null, '', location.pathname); return 'new-sheet'; }
+    if (t) view.tab = t;
+    return t;
+  }
+  function adopt(d) { useContext(d); S = d.state; S.rev = d.rev; dirty = false; const t = tabFromHash(); normalize(); render(); pollCodes(); if (t === 'new-sheet') sheetForm(null); }
+  function openAddFromLink() {
+    if (!new URLSearchParams(location.search).has('add')) return;
+    history.replaceState(null, '', location.pathname);
+    view.month = latestMonth();
+    const sheet = S.sheets.find(s => s.grouped) || S.sheets[0];
+    if (sheet) view.tab = sheet.id;
+    render(); addAccountDialog({ sheet });
+  }
   async function load() {
     const r = await fetch(API + '/state', { credentials: 'same-origin' });
     if (r.status === 401) { location.href = '/admin/login?next=/admin/hezu'; return; }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     adopt(await r.json());
+    openAddFromLink();
   }
 
   // ---------- 验证码（取自验证码后台，只在页面上显示，不写进账本） ----------
@@ -377,7 +424,7 @@
     const draw = () => {
       const k = q.value.trim().toLowerCase();
       const items = A.filter(a => !k || (a.name + ' ' + a.group).toLowerCase().includes(k)).slice(0, 50);
-      setKids(list, items.map(a => h('button', { class: 'item', type: 'button', onclick: () => { row.totpId = a.id; closePop(); touch(); render(); } },
+      setKids(list, items.map(a => h('button', { class: 'item', type: 'button', onclick: () => { row.totpId = a.id; closePop(); const sh = S.sheets.find(x => x.id === view.tab); if (sh) onLinked(row, sh, view.month); pullGroups(); touch(); render(); } },
         a.name, a.group ? h('span', { class: 'faint', text: '  ' + a.group }) : null)), items.length ? null : h('div', { class: 'label', text: '没有匹配的验证码账号' }));
     };
     q.addEventListener('input', draw); draw();
@@ -386,7 +433,7 @@
     q.focus();
   }
   async function copyShareInfo(row) {
-    const r = await fetch('/admin/accounts/' + row.totpId + '/share-text', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRFToken': CSRF } });
+    const r = await api('POST', '/admin/accounts/' + row.totpId + '/share-text', {});
     const d = await r.json().catch(() => ({}));
     if (!r.ok || !d.ok) return alertBox(d.error || '取不到分享信息，请刷新页面后再试。');
     await copyText(d.text);
@@ -432,7 +479,7 @@
     const d = h('dialog', { class: 'dlg' });
     const close = v => { d.close(); d.remove(); if (d._done) d._done(v); };
     d.append(h('h3', { text: title }), h('div', { class: 'body' }, body),
-      h('div', { class: 'foot' }, buttons.map(b => h('button', { class: 'btn ' + (b.cls || ''), type: 'button', text: b.text, onclick: () => { if (!b.run || b.run() !== false) close(b.value); } }))));
+      h('div', { class: 'foot' }, buttons.map(b => h('button', { class: 'btn ' + (b.cls || ''), type: 'button', text: b.text, onclick: async () => { if (b.run && await b.run() === false) return; close(b.value); } }))));
     d.addEventListener('cancel', e => { e.preventDefault(); close(undefined); });
     d.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') { const ok = d.querySelector('.foot .primary'); if (ok) { e.preventDefault(); ok.click(); } } });
     document.body.append(d); d.showModal();
@@ -646,7 +693,8 @@
     const items = [];
     if (sheet.grouped) {
       items.push({ label: '移动到分组' });
-      G.filter(g => g.id !== row.group).forEach(g => items.push({ text: g.name, run: () => { row.group = g.id; touch(); render(); } }));
+      G.filter(g => g.id !== row.group).forEach(g => items.push({ text: g.name, run: () => moveRow(row, g.id) }));
+      if (G.some(g => g.id === row.group)) items.push({ text: '未分组', run: () => moveRow(row, '') });
       items.push('-');
     }
     if (row.totpId > 0 && totpById(row.totpId)) {
@@ -703,10 +751,7 @@
     const toggle = () => { collapsed[key] = !closed; try { localStorage.setItem('hezu-collapsed', JSON.stringify(collapsed)); } catch (e) { /* 忽略 */ } render(); };
     const title = h('button', { class: 'group-title', type: 'button', 'aria-expanded': String(!closed), title: closed ? '展开' : '收起', onclick: toggle },
       h('span', { class: 'chev' }, icon('chev', 16)), group ? h('span', { class: 'dot', style: 'background:' + group.color }) : null, h('span', { text: group ? group.name : sheet.name }));
-    const addBtn = editable && !closed ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => {
-      const r = fixRow({ group: group && group.id ? group.id : '' }); rows.push(r); touch(); render();
-      const inp = document.querySelector('[data-row="' + r.id + '"] input'); if (inp) inp.focus();
-    } }, icon('plus', 15), '添加账号') : null;
+    const addBtn = editable && !closed ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => addAccountDialog({ sheet, group }) }, icon('plus', 15), '添加账号') : null;
     return h('div', { class: 'group' + (closed ? ' closed' : '') },
       h('div', { class: 'group-head' }, title, count, sum),
       closed ? null : list.length ? tableEl(sheet, rows, list, editable, live) : h('div', { class: 'empty', text: editable ? '还没有账号，点下面的“添加账号”。' : '这个月没有账号。' }),
@@ -748,6 +793,60 @@
       if (!G.length) out.push(h('div', { class: 'empty', text: '还没有分组，点上面的“分组”新建。' }));
     } else out.push(section(sheet, rows, null, () => true, editable, live));
     return out;
+  }
+
+  // ---------- 添加账号：账本记录和验证码账号统一从这里加 ----------
+  async function addAccountDialog(preset) {
+    preset = preset || {};
+    const name = h('input', { type: 'text', placeholder: '账号邮箱或名称', autocomplete: 'off', spellcheck: false });
+    const groupSel = h('select', null, h('option', { value: '', text: '未分组' }), G.map(g => h('option', { value: g.id, text: g.name, selected: !!preset.group && g.id === preset.group.id })));
+    const secret = h('input', { type: 'text', placeholder: '没开两步验证就留空', autocomplete: 'off', spellcheck: false });
+    const password = h('input', { type: 'text', placeholder: '可不填；加密保存在验证码账号里', autocomplete: 'off', spellcheck: false });
+    const toLedger = h('input', { type: 'checkbox', checked: true });
+    const sheetSel = h('select', null, S.sheets.map(s => h('option', { value: s.id, text: s.name, selected: !!preset.sheet && s.id === preset.sheet.id })));
+    const fSheet = h('label', { class: 'field' }, '记到哪张表', sheetSel);
+    const err = h('div', { class: 'neg' });
+    toLedger.addEventListener('change', () => { fSheet.hidden = !toLedger.checked; });
+    let made = null;
+    const submit = async () => {
+      err.textContent = '';
+      const n = name.value.trim(), sec = secret.value.trim(), pw = password.value.trim();
+      const sheet = S.sheets.find(x => x.id === sheetSel.value), g = G.find(x => x.id === groupSel.value);
+      if (!n) { name.focus(); return false; }
+      if (!toLedger.checked && !sec) { err.textContent = '不记入账本的话，至少要填 TOTP 密钥（否则什么都没添加）。'; return false; }
+      if (pw && !sec) { err.textContent = '登录密码是存在验证码账号里的，要存密码请同时填 TOTP 密钥。'; return false; }
+      let totpId = 0;
+      if (sec) {
+        const body = { name: n, secret: sec, password: pw, group: g ? g.name : '' };
+        let r = await api('POST', '/accounts', body), d = await r.json().catch(() => ({}));
+        if (r.status === 409 && d.duplicate) {
+          if (!await confirmBox('已有同名的验证码账号', d.error + '\n确认不是重复添加的话，可以继续。', '仍然添加')) return false;
+          r = await api('POST', '/accounts', Object.assign({ confirmDuplicate: true }, body)); d = await r.json().catch(() => ({}));
+        }
+        if (!r.ok || !d.ok) { err.textContent = d.error || '添加失败，请重试。'; return false; }
+        useContext(d); totpId = d.id;
+      }
+      if (toLedger.checked && sheet) {
+        made = fixRow({ account: n, group: sheet.grouped && g ? g.id : '', totpId });
+        S.months[view.month].rows[sheet.id].push(made);
+        view.tab = sheet.id; view.q = '';
+        if (!totpId) linkTotp();   // 没填密钥但验证码那边已有同名账号：直接关联上
+        touch();
+      }
+    };
+    const ok = await dialog('添加账号', [
+      h('label', { class: 'field' }, '账号', name),
+      h('label', { class: 'field' }, '分组', groupSel),
+      h('label', { class: 'field' }, 'TOTP 密钥（两步验证）', secret),
+      h('label', { class: 'field' }, '账号登录密码', password),
+      h('label', { class: 'check' }, toLedger, '同时记入合租账本（' + ymLabel(view.month) + '）'), fSheet,
+      h('div', { class: 'muted', text: '填了 TOTP 密钥会同时建好验证码账号和分享链接，两边自动关联、分组一致。续费日期、续费卡、收费等在表格里接着填。' }),
+      err,
+    ], [{ text: '取消' }, { text: '添加', cls: 'primary', value: true, run: submit }]);
+    if (!ok) return;
+    render(); pollCodes();
+    if (made) { const inp = document.querySelectorAll('[data-row="' + made.id + '"] input')[0]; if (inp) { inp.scrollIntoView({ block: 'center' }); } }
+    else setStatus('已添加验证码账号');
   }
 
   // ---------- 分组 / 表 管理 ----------
@@ -1204,6 +1303,7 @@
   // ---------- 页面 ----------
   function render() {
     closePop(); updaters = []; searchRows = []; codes.els = [];
+    if (location.hash.slice(1) !== view.tab && !location.search) history.replaceState(null, '', '#' + view.tab);
     const M = S.months[view.month], keys = monthKeys(), isLatest = view.month === keys[keys.length - 1], i = keys.indexOf(view.month);
     const go = ym => { view.month = ym; render(); };
     const sheet = S.sheets.find(s => s.id === view.tab);
@@ -1214,14 +1314,14 @@
     const link = (href, text, ic, count) => h('a', { class: 'nav', href, onclick: e => { e.preventDefault(); leave(href); } },
       icon(ic), h('span', { text }), count != null ? h('span', { class: 'count', text: String(count) }) : null);
     const side = h('nav', { class: 'side', 'aria-label': '主导航' },
-      h('div', { class: 'brand' }, h('div', { class: 'logo', text: '租' }), h('span', { text: '合租账本' })),
+      h('div', { class: 'brand' }, h('div', { class: 'logo', text: '租' }), h('span', { text: '合租管理' })),
       nav('home', '总览', 'grid'),
       h('div', { class: 'nav-label', text: '账号' }),
       S.sheets.map(s => nav(s.id, s.name, s.grouped ? 'users' : 'play', M.rows[s.id].length)),
       h('button', { class: 'nav', type: 'button', title: '新建一张表', onclick: () => sheetForm(null) }, icon('plus'), h('span', { text: '新建表' })),
       h('div', { class: 'nav-label', text: '后台' }),
       nav('cards', '支付卡', 'card', S.cards.length), nav('vps', 'VPS', 'server', S.vps.length),
-      h('div', { class: 'nav-label', text: '验证码后台' }),
+      h('div', { class: 'nav-label', text: '验证码' }),
       link('/admin/dashboard', '验证码账号', 'key', A.length), link('/admin/logs', '访问记录', 'list'), link('/admin/settings', '设置', 'gear'),
       h('div', { class: 'side-foot' }, statusEl,
         h('button', { class: 'nav', type: 'button', onclick: e => menu(e.currentTarget, [
