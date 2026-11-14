@@ -132,8 +132,6 @@ select.cell.unset { color: var(--text3); }
 .chip-add:hover { border-color: var(--line2); }
 .chip-add:focus { border: 1px solid var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
 .chip-add::placeholder { color: var(--text3); }
-.unit { display: flex; align-items: center; gap: 4px; min-width: 150px; }
-.unit .cell { width: 72px; } .unit .x { color: var(--text3); }
 
 /* 弹层 */
 .pop { position: absolute; z-index: 30; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-pop); padding: 6px; min-width: 180px; }
@@ -306,3 +304,7 @@ tr:hover .cf-edit, .cf-edit:focus-visible { opacity: 1; }
 .top-status:empty { display: none; }
 .top-status.ok { color: var(--good); background: var(--good-bg); }
 .top-status.err { color: var(--bad); background: var(--bad-bg); font-weight: 600; }
+/* 单价 × 人数这类表 */
+table.grid th.c { text-align: center; }
+.cell.center { text-align: center; font-variant-numeric: tabular-nums; }
+table.grid.unitsheet .cell.strong { font-size: 14.5px; }

@@ -822,11 +822,7 @@
     });
     amount.focus(); amount.select();
   }
-  function unitCell(row, editable) {
-    return h('td', null, h('div', { class: 'unit' },
-      cell(row, 'unitPrice', { num: true, ro: !editable, title: '单价', label: '单价' }), h('span', { class: 'x', text: '×' }),
-      cell(row, 'count', { num: true, ro: !editable, title: '人数', label: '人数' })));
-  }
+
 
   // ---------- 账号表 ----------
   function rowMenu(btn, sheet, rows, row) {
@@ -891,7 +887,9 @@
       h('td', null, h('div', { class: 'acct' }, acct, totpChip(row))),
       h('td', null, dateCell(row, 'renew', !editable, 3, live && !row.stopped)),
       cardCells(row, editable),
-      sheet.mode === 'members' ? membersCell(row, editable) : unitCell(row, editable),
+      sheet.mode === 'members' ? membersCell(row, editable) : [
+        h('td', null, cell(row, 'unitPrice', { num: true, ro: !editable, label: '单价', placeholder: '0' })),
+        h('td', null, cell(row, 'count', { num: true, ro: !editable, label: '人数', placeholder: '0', cls: 'center' }))],
       inc,
       h('td', null, cell(row, 'cost', { num: true, ro: !editable, label: '续费成本' })),
       prof,
@@ -916,10 +914,12 @@
         h('thead', null, h('tr', null, rc.map(c => h('th', { class: c[2] ? 'r' : '', text: c[0] })))),
         h('tbody', null, list.map(r => rowEl(sheet, rows, r, editable, live)))));
     }
-    const cols = [['账号', 240], ['续费日期', 134], ['续费卡信息', 126], ['卡号', 118], [sheet.mode === 'members' ? '收费情况（每人）' : '单价 × 人数', 0], ['收费', 76, 1], ['续费成本', 78, 1], ['利润', 92, 1], ['备注', 88], ['', 42]];
-    return h('div', { class: 'scroll' }, h('table', { class: 'grid', style: 'min-width:1170px;table-layout:fixed' },
+    const cols = sheet.mode === 'members'
+      ? [['账号', 240], ['续费日期', 134], ['续费卡信息', 126], ['卡号', 118], ['收费情况（每人）', 0], ['收费', 76, 1], ['续费成本', 78, 1], ['利润', 92, 1], ['备注', 88], ['', 42]]
+      : [['账号', 220], ['续费日期', 136], ['续费卡信息', 136], ['卡号', 116], ['单价', 84, 1], ['人数', 70, 2], ['收费', 92, 1], ['续费成本', 92, 1], ['利润', 100, 1], ['备注', 0], ['', 42]];
+    return h('div', { class: 'scroll' }, h('table', { class: 'grid' + (sheet.mode === 'members' ? '' : ' unitsheet'), style: (sheet.mode === 'members' ? 'min-width:1170px' : 'min-width:1180px') + ';table-layout:fixed' },
       h('colgroup', null, cols.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
-      h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: c[2] ? 'r' : '' }, i === 0 && list.some(r => r.totpId > 0 && totpById(r.totpId)) ? codeTimerHead(c[0]) : c[0])))),
+      h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: c[2] === 1 ? 'r' : c[2] === 2 ? 'c' : '' }, i === 0 && list.some(r => r.totpId > 0 && totpById(r.totpId)) ? codeTimerHead(c[0]) : c[0])))),
       h('tbody', null, list.map(r => rowEl(sheet, rows, r, editable, live)))));
   }
   function section(sheet, rows, group, filter, editable, live) {
