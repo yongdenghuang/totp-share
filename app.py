@@ -322,7 +322,8 @@ def login_required(f):
             session.clear()
             logged_in = False
         if not logged_in:
-            if request.is_json or request.endpoint == "admin_codes":
+            if (request.is_json or request.endpoint == "admin_codes"
+                    or request.path.startswith("/admin/hezu/api/")):
                 return jsonify(ok=False, error="登录已过期，请刷新页面重新登录"), 401
             return redirect(url_for("login", next=request.path))
         if request.endpoint != "admin_codes":
@@ -508,7 +509,9 @@ def _form_context(exclude_id=None):
 def account_new():
     error = None
     dup_warning = None
-    form_data = {"name": "", "secret": "", "group_name": "", "new_group": "",
+    # 从合租账本点「新建验证码账号」过来时，名称已经带在地址里
+    form_data = {"name": request.args.get("name", "").strip()[:100],
+                 "secret": "", "group_name": "", "new_group": "",
                  "link_password": "", "account_password": ""}
     if request.method == "POST":
         form_data["name"] = request.form.get("name", "").strip()[:100]
@@ -931,6 +934,11 @@ def not_found(e):
 @app.errorhandler(429)
 def rate_limited(e):
     return render_template("404.html", rate=True), 429
+
+# ---------- 合租账本 ----------
+import sys      # noqa: E402
+import hezu     # noqa: E402
+hezu.install(sys.modules[__name__])
 
 if __name__ == "__main__":
     app.run(host=os.environ.get("BIND_ADDR", "127.0.0.1"),

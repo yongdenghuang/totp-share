@@ -45,6 +45,9 @@ def test_admin_pages_require_login(ctx):
 def test_dashboard_has_no_rental_bookkeeping(ctx):
     html = get(ctx.admin(), "/admin/dashboard").get_data(as_text=True)
     assert "plus-01" in html and "pro20x-01" in html
+    # 记账功能现在在单独的「合租账本」页里；验证码列表本身仍然不带任何记账内容
+    assert html.count("合租账本") == 1
+    html = html.replace("合租账本", "")
     for gone in ("租金", "毛利", "合租", "续费", "充值渠道"):
         assert gone not in html
 

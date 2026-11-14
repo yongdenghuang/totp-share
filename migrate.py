@@ -73,6 +73,23 @@ CREATE INDEX IF NOT EXISTS idx_access_logs_seen ON access_logs(last_seen_at);
 """
 
 
+# 合租账本：整份数据压缩加密后存成一行；hezu_history 是每天第一次保存前留下的上一版
+HEZU_SQL = """
+CREATE TABLE IF NOT EXISTS hezu_state (
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    rev             INTEGER NOT NULL,
+    data_encrypted  BLOB NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hezu_history (
+    day             TEXT PRIMARY KEY,
+    rev             INTEGER NOT NULL,
+    data_encrypted  BLOB NOT NULL,
+    saved_at        TEXT NOT NULL
+);
+"""
+
+
 def ensure_schema(db):
     """把数据库补齐到当前版本。返回本次实际执行的变更列表。"""
     changes = []
@@ -110,6 +127,10 @@ def ensure_schema(db):
         color = next_group_color(used)
         db.execute("UPDATE account_groups SET color=? WHERE id=?", (color, gid))
         used.append(color)
+
+    if "hezu_state" not in tables:
+        changes.append("hezu_state")
+    db.executescript(HEZU_SQL)
 
     db.commit()
     return changes
