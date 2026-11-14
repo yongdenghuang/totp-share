@@ -858,13 +858,16 @@
   // ---------- 添加账号：账本记录和验证码账号统一从这里加 ----------
   async function addAccountDialog(preset) {
     preset = preset || {};
+    if (preset.sheet && !preset.sheet.grouped) return addRowDialog(preset.sheet);
     const name = h('input', { type: 'text', placeholder: '账号邮箱或名称', autocomplete: 'off', spellcheck: false });
     const groupSel = h('select', null, h('option', { value: '', text: '未分组' }), G.map(g => h('option', { value: g.id, text: g.name, selected: !!preset.group && g.id === preset.group.id })));
     const secret = h('input', { type: 'text', placeholder: '没开两步验证就留空', autocomplete: 'off', spellcheck: false });
     const password = h('input', { type: 'text', placeholder: '可不填；加密保存在验证码账号里', autocomplete: 'off', spellcheck: false });
     const toLedger = h('input', { type: 'checkbox', checked: true });
-    const sheetSel = h('select', null, S.sheets.map(s => h('option', { value: s.id, text: s.name, selected: !!preset.sheet && s.id === preset.sheet.id })));
-    const fSheet = h('label', { class: 'field' }, '记到哪张表', sheetSel);
+    // 只有分组表（AI 合租）的账号会关联验证码，所以只在这类表之间选
+    const ledgerSheets = S.sheets.filter(s => s.grouped);
+    const sheetSel = h('select', null, ledgerSheets.map(s => h('option', { value: s.id, text: s.name, selected: !!preset.sheet && s.id === preset.sheet.id })));
+    const fSheet = h('label', { class: 'field', hidden: ledgerSheets.length < 2 }, '记到哪张表', sheetSel);
     const err = h('div', { class: 'neg' });
     toLedger.addEventListener('change', () => { fSheet.hidden = !toLedger.checked; });
     let made = null;
@@ -873,7 +876,7 @@
       const n = name.value.trim(), sec = secret.value.trim(), pw = password.value.trim();
       const sheet = S.sheets.find(x => x.id === sheetSel.value), g = G.find(x => x.id === groupSel.value);
       if (!n) { name.focus(); return false; }
-      if (!toLedger.checked && !sec) { err.textContent = '不记入账本的话，至少要填 TOTP 密钥（否则什么都没添加）。'; return false; }
+      if ((!toLedger.checked || !sheet) && !sec) { err.textContent = '不记入账本的话，至少要填 TOTP 密钥（否则什么都没添加）。'; return false; }
       if (pw && !sec) { err.textContent = '登录密码是存在验证码账号里的，要存密码请同时填 TOTP 密钥。'; return false; }
       let totpId = 0;
       if (sec) {
@@ -901,7 +904,7 @@
       h('label', { class: 'field' }, '分组', groupSel),
       h('label', { class: 'field' }, 'TOTP 密钥（两步验证）', secret),
       h('label', { class: 'field' }, '账号登录密码', password),
-      h('label', { class: 'check' }, toLedger, '同时记入合租账本（' + ymLabel(view.month) + '）'), fSheet,
+      ledgerSheets.length ? h('label', { class: 'check' }, toLedger, '同时记入' + (ledgerSheets.length === 1 ? ' ' + ledgerSheets[0].name + ' ' : '合租账本') + '（' + ymLabel(view.month) + '）') : null, fSheet,
       h('div', { class: 'muted', text: '填了 TOTP 密钥会同时建好验证码账号和分享链接，两边自动关联、分组一致。续费日期、续费卡、收费等在表格里接着填。' }),
       err,
     ], [{ text: '取消' }, { text: '添加', cls: 'primary', value: true, run: submit }]);
@@ -962,6 +965,33 @@
       setStatus('分组顺序没保存上', true);
       await refreshContext(); render();
     }
+  }
+
+  // Netflix / Spotify / iCloud 这类普通表：只填这张表自己的列，续费卡和收费在表格里接着填
+  async function addRowDialog(sheet) {
+    const unit = sheet.mode === 'unit';
+    const name = h('input', { type: 'text', placeholder: '账号邮箱或名称', autocomplete: 'off', spellcheck: false });
+    const renew = h('input', { type: 'date' });
+    const price = h('input', { type: 'text', inputMode: 'decimal', placeholder: '每人每月', autocomplete: 'off' });
+    const count = h('input', { type: 'text', inputMode: 'numeric', placeholder: '几个人', autocomplete: 'off' });
+    const cost = h('input', { type: 'text', inputMode: 'decimal', placeholder: '0', autocomplete: 'off' });
+    const note = h('input', { type: 'text', placeholder: '可不填', autocomplete: 'off' });
+    let made = null;
+    const ok = await dialog('添加账号到 ' + sheet.name, [
+      h('label', { class: 'field' }, '账号', name),
+      h('label', { class: 'field' }, '续费日期', renew),
+      unit ? h('div', { class: 'field-row' }, h('label', { class: 'field' }, '单价', price), h('label', { class: 'field' }, '人数', count)) : null,
+      h('label', { class: 'field' }, '续费成本', cost),
+      h('label', { class: 'field' }, '备注', note),
+      h('div', { class: 'muted', text: unit ? '续费卡在表格里选；收费 = 单价 × 人数，自动算。' : '续费卡和每人收费在表格里接着填。' }),
+    ], [{ text: '取消' }, { text: '添加', cls: 'primary', value: true, run: () => {
+      if (!name.value.trim()) { name.focus(); return false; }
+      made = fixRow({ account: name.value.trim(), renew: renew.value, unitPrice: num(price.value), count: num(count.value), cost: num(cost.value), note: note.value.trim() });
+    } }]);
+    if (!ok || !made) return;
+    S.months[view.month].rows[sheet.id].push(made);
+    linkTotp(); touch(); render();
+    const inp = document.querySelector('[data-row="' + made.id + '"] input'); if (inp) inp.scrollIntoView({ block: 'center' });
   }
 
   // ---------- 分组 / 表 管理 ----------
