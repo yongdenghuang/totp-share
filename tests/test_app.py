@@ -212,7 +212,8 @@ def test_group_inline_edit_and_field_whitelist(ctx):
     r = post(c, "/admin/accounts/1/field", json={"field": "group_name", "value": ""})
     assert r.get_json()["raw_value"] == ""
     assert ctx.sql("SELECT group_name FROM accounts WHERE id=1")[0]["group_name"] is None
-    for field in ("renewal_amount", "secret_encrypted", "url_token", "name"):
+    # 账号名现在也可以改（合租账本里改名会同步过来），见 test_hezu.py；其余字段仍然不许
+    for field in ("renewal_amount", "secret_encrypted", "url_token", "password_encrypted"):
         assert post(c, "/admin/accounts/1/field", json={"field": field, "value": "x"}).status_code == 400
 
 

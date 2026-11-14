@@ -445,3 +445,15 @@ def test_fetch_rates_validates_the_source(ctx, monkeypatch):
             assert False, "should have raised"
         except ValueError:
             pass
+
+
+def test_rename_totp_account_from_ledger(ctx):
+    c = ctx.admin()
+    aid = ctx.sql("SELECT id FROM accounts WHERE name='plus-01'")[0]["id"]
+    r = call(c, "post", f"/admin/accounts/{aid}/field", json={"field": "name", "value": "  mati@example.com "})
+    assert r.status_code == 200 and r.get_json()["display"] == "mati@example.com"
+    assert ctx.sql("SELECT name FROM accounts WHERE id=?", (aid,))[0]["name"] == "mati@example.com"
+    names = {a["name"] for a in call(c, "get", f"{API}/context").get_json()["accounts"]}
+    assert "mati@example.com" in names and "plus-01" not in names
+    assert call(c, "post", f"/admin/accounts/{aid}/field", json={"field": "name", "value": "  "}).status_code == 400
+    assert call(c, "post", f"/admin/accounts/{aid}/field", json={"field": "secret_encrypted", "value": "x"}).status_code == 400

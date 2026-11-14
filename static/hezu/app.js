@@ -262,14 +262,26 @@
   // ---------- 分组两边保持一致 ----------
   // 关联了验证码账号的行，分组以验证码账号为准；只动进行中的月份，存档保持当时的样子。
   const groupIdByName = name => { const g = G.find(x => x.name === name); return g ? g.id : ''; };
+  // 关联了验证码账号的行：账号名和分组都以验证码账号为准（存档月份保持当时的样子）
   function pullGroups() {
     let n = 0;
-    for (const ym in S.months) if (!S.months[ym].archived) for (const sh of S.sheets) if (sh.grouped) for (const r of S.months[ym].rows[sh.id] || []) {
+    for (const ym in S.months) if (!S.months[ym].archived) for (const sh of S.sheets) for (const r of S.months[ym].rows[sh.id] || []) {
       const a = r.totpId > 0 ? totpById(r.totpId) : null; if (!a) continue;
+      if (a.name && r.account !== a.name) { r.account = a.name; n++; }
+      if (!sh.grouped) continue;
       const gid = groupIdByName(a.group);
       if (r.group !== gid) { r.group = gid; n++; }
     }
     return n > 0;
+  }
+  // 在账本里改了关联行的账号名：同步改验证码账号，其他月份里同一个账号也跟着改
+  function pushName(row) {
+    const a = row.totpId > 0 ? totpById(row.totpId) : null;
+    const name = String(row.account || '').trim();
+    if (!a || !name || name === a.name) return;
+    a.name = name; pullGroups(); touch(); render();
+    api('POST', '/admin/accounts/' + a.id + '/field', { field: 'name', value: name })
+      .then(r => { if (!r.ok) setStatus('验证码账号的名称没改成，请刷新页面', true); }).catch(() => setStatus('验证码账号的名称没改成，请刷新页面', true));
   }
   // 把验证码账号那边的分组改成 groupId 对应的分组（'' = 未分组）。先改本地再发请求，失败了下次打开会以服务器为准。
   function pushGroup(totpId, groupId) {
@@ -425,7 +437,10 @@
     if (!r.ok) return false;
     const d = await r.json();
     useContext(d); if (d.csrf) CSRF = d.csrf;
-    if (d.rev === S.rev) return true;
+    if (d.rev === S.rev) {   // 账本没变，但验证码账号可能改了名字或分组
+      if (linkTotp()) { touch(); render(); }
+      return true;
+    }
     const remote = d.state;
     const local = bare(S), changed = base && !same(local, base);
     const next = changed ? merge3(base, local, bare(remote)) : bare(remote);
@@ -943,7 +958,7 @@
     updaters.push(() => { const v = income(sheet, row); inc.textContent = money(v); profitText(pill, v - rowCost(sheet, row)); });
     const acct = copyField(row, 'account', { plain: true, ro: !editable, placeholder: '账号', label: '账号',
       title: row.stopped ? '已停止，下个月不会带过去 · 点一下复制账号' : '点一下复制账号',
-      onChange: () => { if (!row.totpId && linkTotp()) { touch(); render(); } } });
+      onChange: () => { if (row.totpId > 0 && totpById(row.totpId)) pushName(row); else if (linkTotp()) { touch(); render(); } } });
     const tr = h('tr', { class: row.stopped ? 'stopped' : '' },
       h('td', null, h('div', { class: 'acct' }, acct, totpChip(row))),
       sheet.grouped ? h('td', null, pwField(row, editable)) : null,

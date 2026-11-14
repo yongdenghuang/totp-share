@@ -720,15 +720,21 @@ def accounts_reorder():
 @app.route("/admin/accounts/<int:aid>/field", methods=["POST"])
 @login_required
 def account_field_update(aid):
-    """列表页内联编辑。接收 JSON: {"field": "group_name", "value": "plus"}
-    目前只开放分组；返回 {"ok": True, "display": "...", "raw_value": "..."}
+    """列表页内联编辑。接收 JSON: {"field": "group_name" | "name", "value": "..."}
+    开放分组和账号名（合租账本里改账号名时同步过来）；返回 {"ok": True, "display": "...", "raw_value": "..."}
     """
     data = request.get_json(silent=True) or {}
-    if data.get("field") != "group_name":
+    if data.get("field") not in ("group_name", "name"):
         return jsonify(ok=False, error="不允许的字段"), 400
     if not query_one("SELECT 1 FROM accounts WHERE id=?", (aid,)):
         return jsonify(ok=False, error="账号不存在"), 404
     raw = data.get("value")
+    if data["field"] == "name":
+        name = str(raw or "").strip()[:100]
+        if not name:
+            return jsonify(ok=False, error="账号名称不能为空"), 400
+        execute("UPDATE accounts SET name=? WHERE id=?", (name, aid))
+        return jsonify(ok=True, display=name, raw_value=name)
     try:
         group = resolve_group(str(raw) if raw is not None else "")
     except ValueError as e:
