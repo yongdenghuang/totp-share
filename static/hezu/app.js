@@ -18,6 +18,8 @@
     archive: '<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/>',
     key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>',
     list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    link: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
     fx: '<path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>',
     gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>',
   };
@@ -205,7 +207,12 @@
       if (r.issuerId && !issuerIds.has(r.issuerId)) { r.issuerId = ''; r.cardId = ''; }
       if (r.cardId) { const c = cardById(r.cardId); if (!c || c.issuerId !== r.issuerId) r.cardId = ''; }
     }
-    S.vps = S.vps.map(v => Object.assign({ id: uid(), host: '', ip: '', password: '', deploy: '', traffic: '', renew: '', price: '', email: '' }, v));
+    S.vps = S.vps.map(v => {
+      const o = Object.assign(newVps(), v);
+      if (!Array.isArray(o.tags)) o.tags = [];
+      if ('deploy' in o) { if (o.deploy && !o.tags.length) o.tags = splitTags(o.deploy); delete o.deploy; changed = true; }
+      return o;
+    });
     if (!view.month || !S.months[view.month]) view.month = latestMonth();
     if (!['home', 'cards', 'vps'].includes(view.tab) && !S.sheets.some(s => s.id === view.tab)) view.tab = 'home';
     if (linkTotp()) changed = true;
@@ -275,6 +282,8 @@
     if (row.totpId > 0 && totpById(row.totpId) && !S.months[view.month].archived) { pushGroup(row.totpId, groupId); pullGroups(); }
     touch(); render();
   }
+  function newVps() { return { id: uid(), host: '', site: '', ip: '', port: '', password: '', tags: [], traffic: '', renew: '', price: '', email: '' }; }
+  function splitTags(t) { return String(t || '').split(/[，,、/;；|\n]+/).map(x => x.trim()).filter((x, i, a) => x && a.indexOf(x) === i); }
   function income(sheet, r) { return sheet.mode === 'members' ? r.members.reduce((a, m) => a + num(m.amount), 0) : num(r.unitPrice) * num(r.count); }
   function heads(sheet, r) { return sheet.mode === 'members' ? r.members.length : num(r.count); }
   const zero = () => ({ n: 0, heads: 0, income: 0, cost: 0, profit: 0 });
@@ -1048,24 +1057,146 @@
   }
 
   // ---------- VPS ----------
-  function vpsView() {
-    const cols = [['主机', 190], ['IP', 130], ['密码', 120], ['部署', 0], ['流量及重置', 100], ['续费', 150], ['价格', 110], ['邮箱', 190], ['', 42]];
-    const body = S.vps.map(v => h('tr', null,
-      h('td', null, cell(v, 'host', { cls: 'strong', label: '主机' })), h('td', null, cell(v, 'ip', { cls: 'mono', label: 'IP' })),
-      h('td', null, cell(v, 'password', { mask: 'all', title: '点一下显示', label: '密码' })),
-      h('td', null, cell(v, 'deploy', { label: '部署' })), h('td', null, cell(v, 'traffic', { label: '流量及重置' })),
-      h('td', null, dateCell(v, 'renew', false, 14, true)),
-      h('td', null, cell(v, 'price', { label: '价格' })), h('td', null, cell(v, 'email', { label: '邮箱' })),
-      h('td', null, h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => menu(e.currentTarget, [{ text: '删除这一行', danger: true, run: async () => {
+  const TAG_COLORS = ['teal', 'blue', 'amber', 'purple', 'green', 'pink', 'red', 'gray'];
+  function hashColor(text) { let n = 0; for (const ch of String(text)) n = (n * 31 + ch.codePointAt(0)) >>> 0; return 'c-' + TAG_COLORS[n % TAG_COLORS.length]; }
+  // 价格列是自由文字（如 "$28.18  40cad"），汇总时取第一个数字，按美元算
+  function priceUsd(t) { const m = String(t || '').replace(/,/g, '').match(/\d+(?:\.\d+)?/); return m ? +m[0] : null; }
+  let RATES = null, ratesAt = 0;
+  async function ensureRates() {
+    if (RATES || Date.now() - ratesAt < 60000) return;
+    ratesAt = Date.now();
+    try { const r = await fetch(API + '/rates', { credentials: 'same-origin' }), d = await r.json(); if (r.ok && d.ok) RATES = d; } catch (e) { /* 取不到就只显示美元 */ }
+    if (RATES) recalc();
+  }
+  const usdToCny = usd => RATES && RATES.rates.CNY ? usd * RATES.rates.CNY : null;
+  function flash(el, text) {
+    if (el.dataset.flash) return;
+    el.dataset.flash = el.textContent; el.textContent = text; el.classList.add('ok');
+    setTimeout(() => { el.textContent = el.dataset.flash; delete el.dataset.flash; el.classList.remove('ok'); }, 900);
+  }
+  async function copyQuiet(text, el) {
+    try { await navigator.clipboard.writeText(text); if (el) flash(el, '已复制'); else setStatus('已复制'); }
+    catch (e) { alertBox('浏览器不让自动复制，请手动复制：\n' + text); }
+  }
+  // 点一下复制的格子：IP、密码。旁边的小笔用来修改；空着的时候直接是输入框
+  function copyField(v, key, opts) {
+    const wrap = h('div', { class: 'cf' });
+    const editor = () => {
+      const inp = cell(v, key, { cls: opts.mono ? 'mono' : '', placeholder: opts.placeholder, label: opts.label });
+      inp.addEventListener('blur', () => { if (v[key]) setTimeout(draw, 0); });
+      return inp;
+    };
+    function draw(edit) {
+      if (edit || !v[key]) {
+        const inp = editor(); setKids(wrap, inp);
+        if (edit) { inp.focus(); inp.select(); }
+        return;
+      }
+      const val = h('button', { class: 'cf-val' + (opts.mono ? ' mono' : ''), type: 'button', title: '点一下复制' + opts.label, onclick: () => copyQuiet(v[key], val) },
+        opts.mask ? '••••••••' : v[key]);
+      setKids(wrap, val, h('button', { class: 'cf-edit', type: 'button', title: '修改' + opts.label, 'aria-label': '修改' + opts.label, onclick: () => draw(true) }, icon('pen', 13)));
+    }
+    draw(false);
+    return wrap;
+  }
+  const fixUrl = u => { u = String(u || '').trim(); return !u || /^https?:\/\//i.test(u) ? u : 'https://' + u; };
+  function siteField(v) {
+    const wrap = h('div', { class: 'cf' }), fix = fixUrl;
+    function draw(edit) {
+      if (edit || !v.site) {
+        const inp = cell(v, 'site', { placeholder: '官网网址', label: '官网网址' });
+        const done = () => { const f = fix(v.site); if (f !== v.site) { v.site = f; touch(); } if (v.site) setTimeout(() => draw(false), 0); };
+        inp.addEventListener('change', done); inp.addEventListener('blur', done);
+        setKids(wrap, inp);
+        if (edit) { inp.focus(); inp.select(); }
+        return;
+      }
+      let label = v.site;
+      try { label = new URL(v.site).hostname.replace(/^www\./, ''); } catch (e) { /* 原样显示 */ }
+      setKids(wrap, h('a', { class: 'site-link', href: fix(v.site), target: '_blank', rel: 'noopener noreferrer', title: '打开 ' + v.site }, icon('link', 13), h('span', { text: label })),
+        h('button', { class: 'cf-edit', type: 'button', title: '修改官网网址', 'aria-label': '修改官网网址', onclick: () => draw(true) }, icon('pen', 13)));
+    }
+    draw(false);
+    return wrap;
+  }
+  function tagsField(v) {
+    const box = h('div', { class: 'vtags' });
+    function draw(focus) {
+      const add = h('input', { class: 'vtag-add', type: 'text', placeholder: v.tags.length ? '+' : '+ 项目', 'aria-label': '添加部署项目', autocomplete: 'off', title: '输入项目名回车；可以一次填多个，用逗号隔开' });
+      const commit = refocus => {
+        const list = splitTags(add.value); add.value = '';
+        const fresh = list.filter(t => !v.tags.includes(t));
+        if (!fresh.length) return;
+        v.tags.push(...fresh); touch(); draw(refocus);
+      };
+      add.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+        else if (e.key === 'Backspace' && !add.value && v.tags.length) { v.tags.pop(); touch(); draw(true); }
+      });
+      add.addEventListener('blur', () => commit(false));
+      setKids(box, v.tags.map((t, i) => h('span', { class: 'vtag ' + hashColor(t) }, h('span', { text: t }),
+        h('button', { type: 'button', 'aria-label': '去掉 ' + t, title: '去掉', onclick: () => { v.tags.splice(i, 1); touch(); draw(); } }, '✕'))), add);
+      if (focus) add.focus();
+    }
+    draw(false);
+    return box;
+  }
+  function vpsMenu(btn, v) {
+    const addr = v.ip ? v.ip + (v.port ? ':' + v.port : '') : '';
+    menu(btn, [
+      addr ? { text: '复制 ' + addr, run: () => copyQuiet(addr) } : null,
+      v.ip ? { text: '复制 SSH 登录命令', run: () => copyQuiet('ssh ' + (v.port ? '-p ' + v.port + ' ' : '') + 'root@' + v.ip) } : null,
+      v.site ? { text: '打开官网', run: () => window.open(fixUrl(v.site), '_blank', 'noopener') } : null,
+      addr || v.site ? '-' : null,
+      { text: '删除这台 VPS', danger: true, run: async () => {
         if (await confirmBox('删除 VPS', '删除 “' + (v.host || '未命名') + '”？', '删除', true)) { S.vps.splice(S.vps.indexOf(v), 1); touch(); render(); }
-      } }]) }, icon('more')))));
+      } },
+    ]);
+  }
+  function vpsTiles() {
+    const v = [0, 1, 2, 3].map(() => h('div', { class: 'v' })), sub = [0, 1, 2, 3].map(() => h('div', { class: 's' }));
+    const t = ['主机', '价格合计（美元）', '折合人民币', '下一台到期'].map((k, i) => h('div', { class: 'tile' + (i === 3 ? ' tile-next' : '') }, h('div', { class: 'k', text: k }), v[i], sub[i]));
+    updaters.push(() => {
+      const priced = S.vps.map(x => priceUsd(x.price)).filter(x => x != null), usd = priced.reduce((a, b) => a + b, 0), cny = usdToCny(usd);
+      v[0].textContent = S.vps.length + ' 台'; sub[0].textContent = priced.length + ' 台填了价格';
+      v[1].textContent = '$' + usd.toLocaleString('zh-CN', { maximumFractionDigits: 2 }); sub[1].textContent = '价格列的第一个数字，按美元算';
+      v[2].textContent = cny == null ? '—' : money(cny);
+      sub[2].textContent = RATES ? '1 USD = ' + RATES.rates.CNY.toFixed(4) + ' CNY · 每天更新' : '正在取汇率…';
+      const next = S.vps.map(x => ({ x, d: daysUntil(x.renew) })).filter(o => o.d != null).sort((a, b) => a.d - b.d)[0];
+      v[3].textContent = next ? (next.x.host || '未命名') : '—';
+      sub[3].textContent = next ? dateText(next.x.renew) + ' · ' + relText(next.d) : '还没有填续费日期';
+      t[3].classList.toggle('bad', !!next && next.d < 0);
+    });
+    return h('div', { class: 'tiles' }, t);
+  }
+  function vpsView() {
+    ensureRates();
+    const cols = [['主机', 180], ['官网', 116], ['IP', 148], ['端口', 62], ['密码', 104], ['部署', 0], ['流量及重置', 80], ['续费', 140], ['价格', 108], ['', 40]];
+    const body = S.vps.map(v => {
+      const cnyEl = h('div', { class: 'cny' });
+      updaters.push(() => { const u = priceUsd(v.price), c = u == null ? null : usdToCny(u); cnyEl.textContent = c == null ? '' : '≈ ' + money(c); });
+      return h('tr', null,
+        h('td', null, h('div', { class: 'hostcell' }, h('span', { class: 'avatar ' + hashColor(v.host || '?'), text: (Array.from(v.host || '?')[0] || '?').toUpperCase(), 'aria-hidden': 'true' }),
+          h('div', { class: 'hostlines' }, cell(v, 'host', { cls: 'strong', label: '主机', placeholder: '主机名' }), cell(v, 'email', { cls: 'sub', label: '注册邮箱', placeholder: '注册邮箱' })))),
+        h('td', null, siteField(v)),
+        h('td', null, copyField(v, 'ip', { mono: true, label: ' IP', placeholder: 'IP' })),
+        h('td', null, cell(v, 'port', { cls: 'mono', label: '端口', placeholder: '端口' })),
+        h('td', null, copyField(v, 'password', { mask: true, label: '密码', placeholder: '密码' })),
+        h('td', null, tagsField(v)),
+        h('td', null, cell(v, 'traffic', { label: '流量及重置' })),
+        h('td', null, dateCell(v, 'renew', false, 14, true)),
+        h('td', null, h('div', { class: 'price' }, cell(v, 'price', { right: true, label: '价格', placeholder: '$0' }), cnyEl)),
+        h('td', null, h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => vpsMenu(e.currentTarget, v) }, icon('more'))));
+    });
     return [
-      h('div', { class: 'group' },
-        h('div', { class: 'group-head' }, h('span', { class: 'group-title', text: '全部主机' }), h('span', { class: 'pill', text: S.vps.length + ' 台' }), h('span', { class: 'group-sum', text: '不分月份 · 14 天内到期会标出来' })),
-        S.vps.length ? h('div', { class: 'scroll' }, h('table', { class: 'grid', style: 'min-width:1100px' },
+      vpsTiles(),
+      h('div', { class: 'group vps' },
+        h('div', { class: 'group-head' }, h('span', { class: 'group-title', text: '全部主机' }), h('span', { class: 'pill', text: S.vps.length + ' 台' }),
+          h('span', { class: 'group-sum', text: '点 IP、密码复制 · 部署项目回车添加 · 14 天内到期会标出来' })),
+        S.vps.length ? h('div', { class: 'scroll' }, h('table', { class: 'grid', style: 'min-width:1130px;table-layout:fixed' },
           h('colgroup', null, cols.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
-          h('thead', null, h('tr', null, cols.map(c => h('th', { text: c[0] })))), h('tbody', null, body))) : h('div', { class: 'empty', text: '还没有 VPS。' }),
-        h('div', { class: 'group-foot' }, h('button', { class: 'btn ghost small', type: 'button', onclick: () => { S.vps.push({ id: uid(), host: '', ip: '', password: '', deploy: '', traffic: '', renew: '', price: '', email: '' }); touch(); render(); const ins = document.querySelectorAll('tbody tr:last-child input'); if (ins[0]) ins[0].focus(); } }, icon('plus', 15), '添加 VPS'))),
+          h('thead', null, h('tr', null, cols.map(c => h('th', { class: c[0] === '价格' ? 'r' : '', text: c[0] })))), h('tbody', null, body))) : h('div', { class: 'empty', text: '还没有 VPS。' }),
+        h('div', { class: 'group-foot' }, h('button', { class: 'btn ghost small', type: 'button', onclick: () => { S.vps.push(newVps()); touch(); render(); const ins = document.querySelectorAll('.vps tbody tr:last-child input'); if (ins[0]) ins[0].focus(); } }, icon('plus', 15), '添加 VPS'))),
     ];
   }
 
@@ -1081,7 +1212,7 @@
     }
     for (const v of S.vps) {
       const d = daysUntil(v.renew); if (d == null || d > 14) continue;
-      items.push({ d, title: v.host || '未命名 VPS', meta: ['VPS', v.deploy].filter(Boolean).join(' · '), cost: v.price || '', action: h('button', { class: 'btn ghost small', type: 'button', text: '去修改', onclick: () => { view.tab = 'vps'; render(); } }) });
+      items.push({ d, title: v.host || '未命名 VPS', meta: ['VPS', (v.tags || []).join('、')].filter(Boolean).join(' · '), cost: v.price || '', action: h('button', { class: 'btn ghost small', type: 'button', text: '去修改', onclick: () => { view.tab = 'vps'; render(); } }) });
     }
     items.sort((a, b) => a.d - b.d);
     return h('div', { class: 'group' },
@@ -1390,7 +1521,7 @@
     const cardRows = [];
     for (const it of S.issuers) { const own = cardsOf(it.id); if (!own.length) cardRows.push([it.name, it.country || '', '', '']); own.forEach(c => cardRows.push([it.name, it.country || '', c.number || '', c.note || ''])); }
     out.push({ name: '支付卡', head: ['卡信息', '国家 / 地区', '卡号', '备注'], rows: cardRows });
-    out.push({ name: 'VPS', head: ['主机', 'IP', '密码', '部署', '流量及重置', '续费', '价格', '邮箱'], rows: S.vps.map(v => [v.host, v.ip, v.password, v.deploy, v.traffic, D(v.renew), v.price, v.email]) });
+    out.push({ name: 'VPS', head: ['主机', '官网', 'IP', '端口', '密码', '部署', '流量及重置', '续费', '价格', '邮箱'], rows: S.vps.map(v => [v.host, v.site, v.ip, v.port, v.password, (v.tags || []).join('，'), v.traffic, D(v.renew), v.price, v.email]) });
     return out;
   }
   function download(blob, name) {

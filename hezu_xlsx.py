@@ -16,7 +16,7 @@ MAX_UNZIPPED = 60 * 1024 * 1024
 
 SECTION_NAMES = {'PRO': 'GPT Pro 20x', 'PLUS': 'GPT Plus'}
 UNSORTED = '待分类'
-VPS_FIELDS = {'主机': 'host', 'IP': 'ip', '密码': 'password', '部署': 'deploy',
+VPS_FIELDS = {'主机': 'host', '官网': 'site', 'IP': 'ip', '端口': 'port', '密码': 'password', '部署': 'deploy',
               '流量及重置': 'traffic', '续费': 'renew', '价格': 'price', '邮箱': 'email'}
 
 
