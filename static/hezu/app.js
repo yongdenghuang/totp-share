@@ -346,7 +346,11 @@
     } catch (e) { /* 断网，下次再试 */ }
     return false;
   }
-  function setStatus(text, err) { if (statusEl) { statusEl.textContent = text; statusEl.className = 'status' + (err ? ' err' : ''); } }
+  let lastStatus = { text: '', err: false };
+  function setStatus(text, err) {
+    lastStatus = { text, err: !!err };
+    document.querySelectorAll('.save-status').forEach(el => { el.textContent = text; el.classList.toggle('err', !!err); el.classList.toggle('ok', !err && /^已保存/.test(text)); });
+  }
   function touch() {
     dirty = true; setStatus('有改动…');
     clearTimeout(saveTimer); saveTimer = setTimeout(save, 900);
@@ -356,32 +360,113 @@
   let reloginBar = null;
   function showRelogin(on) {
     if (on && !reloginBar) {
-      reloginBar = h('div', { class: 'relogin', role: 'alert' }, h('span', { text: '登录已过期，刚才的改动还没保存。' }),
+      const pending = dirty || saving;
+      reloginBar = h('div', { class: 'relogin', role: 'alert' }, h('span', { text: pending ? '登录已过期，刚才的改动还没保存。' : '登录已过期（30 分钟没有操作会自动退出）。' }),
         h('a', { class: 'btn small primary', href: '/admin/login?next=/admin/hezu', target: '_blank', rel: 'noopener', text: '在新窗口重新登录' }),
-        h('span', { class: 'muted', text: '登录后回到这里，会自动保存。' }));
+        h('span', { class: 'muted', text: pending ? '登录后回到这里，会自动保存，不要刷新本页。' : '登录后回到这里再修改。' }));
       document.body.append(reloginBar);
     } else if (!on && reloginBar) { reloginBar.remove(); reloginBar = null; }
   }
+  // ---------- 冲突合并 ----------
+  // base = 本页最后一次和服务器一致时的账本。别的窗口（或服务器上的脚本）先存了一版时，
+  // 用 base 找出“本页改了什么、对方改了什么”，两边的改动都留下；同一个格子两边都改了，以本页为准。
+  let base = null;
+  const clone = x => JSON.parse(JSON.stringify(x));
+  function stable(x) {
+    if (Array.isArray(x)) return '[' + x.map(stable).join(',') + ']';
+    if (x && typeof x === 'object') return '{' + Object.keys(x).sort().map(k => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}';
+    return JSON.stringify(x === undefined ? null : x);
+  }
+  const same = (a, b) => stable(a) === stable(b);
+  const isObj = x => x && typeof x === 'object' && !Array.isArray(x);
+  const keyed = a => Array.isArray(a) && a.every(x => isObj(x) && x.id != null);
+  function merge3(b, l, r) {
+    if (same(l, b)) return r;
+    if (same(r, b) || same(l, r)) return l;
+    if (keyed(l) && keyed(r)) {
+      const bl = keyed(b) ? b : [], bm = new Map(bl.map(x => [x.id, x])), lm = new Map(l.map(x => [x.id, x])), rm = new Map(r.map(x => [x.id, x]));
+      const localReordered = !same(l.map(x => x.id).filter(id => bm.has(id) && rm.has(id)), bl.map(x => x.id).filter(id => lm.has(id) && rm.has(id)));
+      const first = localReordered ? l : r, second = localReordered ? r : l, ids = first.map(x => x.id);
+      // 另一边新加的：放在它后一个邻居前面；后面没有邻居（多半是加在末尾）就放最后
+      second.forEach((x, k) => { if (!ids.includes(x.id)) { const next = second.slice(k + 1).find(y => ids.includes(y.id)); ids.splice(next ? ids.indexOf(next.id) : ids.length, 0, x.id); } });
+      const out = [];
+      for (const id of ids) {
+        const bx = bm.get(id), lx = lm.get(id), rx = rm.get(id);
+        if (lx && rx) out.push(merge3(bx, lx, rx));
+        else if (lx) { if (!bx || !same(lx, bx)) out.push(lx); }       // 对方删了、本页没动 → 删
+        else if (rx) { if (!bx || !same(rx, bx)) out.push(rx); }       // 本页删了、对方没动 → 删
+      }
+      return out;
+    }
+    if (isObj(l) && isObj(r)) {
+      const bb = isObj(b) ? b : {}, out = {};
+      for (const k of new Set([...Object.keys(r), ...Object.keys(l)])) {
+        if (k in l && k in r) out[k] = merge3(bb[k], l[k], r[k]);
+        else if (k in l) { if (!(k in bb) || !same(l[k], bb[k])) out[k] = l[k]; }
+        else if (!(k in bb) || !same(r[k], bb[k])) out[k] = r[k];
+      }
+      return out;
+    }
+    return l;
+  }
+  const bare = st => { const c = clone(st); delete c.rev; return c; };
+  // 服务器上有新版本：本页没有未保存的改动就直接换成新版本；有的话合并进去再存
+  async function pullLatest(reason) {
+    const r = await fetch(API + '/state', { credentials: 'same-origin' });
+    if (r.status === 401) { showRelogin(true); return false; }
+    if (!r.ok) return false;
+    const d = await r.json();
+    useContext(d); if (d.csrf) CSRF = d.csrf;
+    if (d.rev === S.rev) return true;
+    const remote = d.state;
+    const local = bare(S), changed = base && !same(local, base);
+    const next = changed ? merge3(base, local, bare(remote)) : bare(remote);
+    base = bare(remote);
+    S = next; S.rev = d.rev;
+    normalize(); render(); pollCodes();
+    if (changed) { dirty = true; setStatus(reason === 'conflict' ? '已合并别处的修改，正在保存…' : '已同步别处的修改'); }
+    else setStatus('已同步别处的修改');
+    return true;
+  }
+  const channel = 'BroadcastChannel' in window ? new BroadcastChannel('hezu-ledger') : null;
+  if (channel) channel.onmessage = e => { if (e.data && e.data.rev !== (S && S.rev) && !saving) pullLatest('peer').then(() => { if (dirty) { clearTimeout(saveTimer); saveTimer = setTimeout(save, 300); } }); };
+  // 切回这个窗口时看看服务器上有没有新版本，顺便确认登录还在
+  let lastCheck = 0;
+  async function checkFresh() {
+    if (!S || saving || Date.now() - lastCheck < 5000) return;
+    lastCheck = Date.now();
+    await pullLatest('focus');
+    if (dirty) { clearTimeout(saveTimer); saveTimer = setTimeout(save, 300); }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkFresh(); });
+  window.addEventListener('focus', checkFresh);
+
+  let conflicts = 0;
   async function save() {
     if (saving || !dirty) return;
     saving = true; dirty = false; setStatus('保存中…');
     let again = 900;   // 保存期间又有改动时，多久后再存一次
     if (reloginBar && (await refreshContext()) !== true) {   // 还没重新登录：先别反复上传整份账本
-      saving = false; dirty = true; setStatus('登录已过期', true);
+      saving = false; dirty = true; setStatus('登录已过期，改动还没保存', true);
       clearTimeout(saveTimer); saveTimer = setTimeout(save, 5000); return;
     }
+    const sent = bare(S);
     try {
       const r = await api('PUT', '/state', { rev: S.rev, state: S });
-      if (r.status === 401) { dirty = true; again = 5000; setStatus('登录已过期', true); showRelogin(true); }
+      if (r.status === 401) { dirty = true; again = 5000; setStatus('登录已过期，改动还没保存', true); showRelogin(true); }
       else if (r.status === 409) {
-        dirty = false;
-        await alertBox('账本已经在别的窗口或设备上改过了。\n为了不互相覆盖，这里会重新加载最新数据，刚才这一下的改动需要重做。');
-        saving = false; return load();
+        // 别的窗口先存了：把两边的改动合并后再存，不丢本页的改动
+        dirty = true; saving = false;
+        if (++conflicts > 5) { conflicts = 0; setStatus('保存冲突，请刷新页面', true); return; }
+        await pullLatest('conflict');
+        clearTimeout(saveTimer); saveTimer = setTimeout(save, 200); return;
       }
       else if (!r.ok) throw new Error('HTTP ' + r.status);
       else {
         const d = await r.json(); S.rev = d.rev; if (d.csrf) CSRF = d.csrf;
+        base = sent; conflicts = 0;
         showRelogin(false);
+        if (channel) channel.postMessage({ rev: d.rev });
         const t = new Date(); setStatus('已保存 ' + p2(t.getHours()) + ':' + p2(t.getMinutes()));
       }
     } catch (e) {
@@ -407,7 +492,7 @@
     if (t) view.tab = t;
     return t;
   }
-  function adopt(d) { useContext(d); S = d.state; S.rev = d.rev; dirty = false; const t = tabFromHash(); normalize(); render(); pollCodes(); if (t === 'new-sheet') sheetForm(null); }
+  function adopt(d) { useContext(d); S = d.state; S.rev = d.rev; base = bare(d.state); dirty = false; const t = tabFromHash(); normalize(); render(); pollCodes(); if (t === 'new-sheet') sheetForm(null); }
   function openAddFromLink() {
     if (!new URLSearchParams(location.search).has('add')) return;
     history.replaceState(null, '', location.pathname);
@@ -432,7 +517,7 @@
     try {
       const r = await fetch('/admin/codes', { credentials: 'same-origin' });
       if (r.ok) { const d = await r.json(); codes.map = d.codes || {}; codes.until = Date.now() + d.remaining * 1000; codes.period = d.period || 30; wait = d.remaining * 1000 + 500; }
-      else codes.map = {};
+      else { codes.map = {}; if (r.status === 401) showRelogin(true); }
     } catch (e) { /* 断网时稍后再取 */ }
     paintCodes();
     codes.timer = setTimeout(pollCodes, wait);
@@ -1719,7 +1804,7 @@
     const go = ym => { view.month = ym; render(); };
     const sheet = S.sheets.find(s => s.id === view.tab);
     const monthBound = view.tab !== 'vps';
-    statusEl = h('div', { class: 'status', text: statusEl ? statusEl.textContent : '' });
+    statusEl = h('div', { class: 'status save-status' + (lastStatus.err ? ' err' : ''), text: lastStatus.text });
     const nav = (id, text, ic, count) => h('button', { class: 'nav' + (view.tab === id ? ' on' : ''), type: 'button', 'aria-current': view.tab === id ? 'page' : undefined, onclick: () => { view.tab = id; view.q = ''; render(); } },
       icon(ic), h('span', { text }), count != null ? h('span', { class: 'count', text: String(count) }) : null);
     const link = (href, text, ic, count) => h('a', { class: 'nav', href, onclick: e => { e.preventDefault(); leave(href); } },
@@ -1748,7 +1833,7 @@
           { text: '退出登录', run: logout },
         ]) }, icon('more'), h('span', { text: '更多' }))));
     const title = view.tab === 'home' ? '总览' : view.tab === 'cards' ? '支付卡' : view.tab === 'vps' ? 'VPS' : sheet.name;
-    const top = h('div', { class: 'top' }, h('h1', { text: title }), h('span', { class: 'spacer' }));
+    const top = h('div', { class: 'top' }, h('h1', { text: title }), h('span', { class: 'top-status save-status' + (lastStatus.err ? ' err' : /^已保存/.test(lastStatus.text) ? ' ok' : ''), text: lastStatus.text }), h('span', { class: 'spacer' }));
     if (monthBound) {
       add(top, [
         isLatest ? null : h('span', { class: 'badge', text: '已归档' }),
