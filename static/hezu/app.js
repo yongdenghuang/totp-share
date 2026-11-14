@@ -208,7 +208,30 @@
     if (!view.month || !S.months[view.month]) view.month = latestMonth();
     if (!['home', 'cards', 'vps'].includes(view.tab) && !S.sheets.some(s => s.id === view.tab)) view.tab = 'home';
     if (linkTotp()) changed = true;
+    if (syncFromTotp()) changed = true;
     if (changed) touch();
+  }
+  // 验证码账号里登记了、这个月账本里还没有的账号，自动在 AI 合租里补一行：账号和分组照搬，收费成本自己填。
+  // 手动删掉或取消关联过的记在 totpSkip 里，不会被自动补回来（「更多 → 重新同步验证码账号」可以全部找回）。
+  function syncFromTotp() {
+    const ids = new Set(A.map(a => a.id));
+    const before = (S.totpSkip || []).length;
+    S.totpSkip = (S.totpSkip || []).filter((id, i, arr) => ids.has(id) && arr.indexOf(id) === i);
+    let n = S.totpSkip.length !== before ? 1 : 0;
+    const ym = latestMonth(), M = S.months[ym];
+    const sheet = S.sheets.find(s => s.grouped) || S.sheets.find(s => s.mode === 'members');
+    if (!M || M.archived || !sheet) return n > 0;
+    const skip = new Set(S.totpSkip), have = new Set();
+    for (const sh of S.sheets) for (const r of M.rows[sh.id]) if (r.totpId > 0) have.add(r.totpId);
+    for (const a of A) if (!have.has(a.id) && !skip.has(a.id)) {
+      M.rows[sheet.id].push(fixRow({ account: a.name, group: groupIdByName(a.group), totpId: a.id })); n++;
+    }
+    return n > 0;
+  }
+  function skipTotp(id, on) {
+    const list = (S.totpSkip || []).filter(x => x !== id);
+    if (on) list.push(id);
+    S.totpSkip = list;
   }
   // 账号和某个验证码账号同名（且只有一个）时自动关联。totpId: 0 = 没关联，-1 = 手动取消过，不再自动关联
   function linkTotp() {
@@ -424,7 +447,7 @@
     const draw = () => {
       const k = q.value.trim().toLowerCase();
       const items = A.filter(a => !k || (a.name + ' ' + a.group).toLowerCase().includes(k)).slice(0, 50);
-      setKids(list, items.map(a => h('button', { class: 'item', type: 'button', onclick: () => { row.totpId = a.id; closePop(); const sh = S.sheets.find(x => x.id === view.tab); if (sh) onLinked(row, sh, view.month); pullGroups(); touch(); render(); } },
+      setKids(list, items.map(a => h('button', { class: 'item', type: 'button', onclick: () => { row.totpId = a.id; skipTotp(a.id, false); closePop(); const sh = S.sheets.find(x => x.id === view.tab); if (sh) onLinked(row, sh, view.month); pullGroups(); touch(); render(); } },
         a.name, a.group ? h('span', { class: 'faint', text: '  ' + a.group }) : null)), items.length ? null : h('div', { class: 'label', text: '没有匹配的验证码账号' }));
     };
     q.addEventListener('input', draw); draw();
@@ -700,7 +723,7 @@
     if (row.totpId > 0 && totpById(row.totpId)) {
       items.push({ text: '复制分享信息（账号、密码、验证码链接）', run: () => copyShareInfo(row) });
       items.push({ text: '编辑验证码账号（密钥、密码、分享链接）', run: () => leave('/admin/accounts/' + row.totpId + '/edit') });
-      items.push({ text: '取消关联验证码', run: () => { row.totpId = -1; touch(); render(); } });
+      items.push({ text: '取消关联验证码', run: () => { skipTotp(row.totpId, true); row.totpId = -1; touch(); render(); } });
     } else items.push({ text: '关联验证码账号…', run: () => linkTotpMenu(btn, row) });
     items.push('-');
     items.push({ text: '续费日期顺延一个月', run: () => { if (!row.renew) return alertBox('这一行还没填续费日期。'); row.renew = shiftMonth(row.renew, 1); touch(); render(); } });
@@ -708,7 +731,11 @@
     items.push({ text: row.stopped ? '恢复使用' : '标记为停止（下月不再带入）', run: () => { row.stopped = !row.stopped; touch(); render(); } });
     items.push('-');
     items.push({ text: '删除这一行', danger: true, run: async () => {
-      if (await confirmBox('删除账号', '删除 “' + (row.account || '未填账号') + '” 这一行？\n只影响 ' + ymLabel(view.month) + '，其他月份不变。', '删除', true)) { rows.splice(rows.indexOf(row), 1); touch(); render(); }
+      if (await confirmBox('删除账号', '删除 “' + (row.account || '未填账号') + '” 这一行？\n只影响 ' + ymLabel(view.month) + '，其他月份不变。', '删除', true)) {
+        rows.splice(rows.indexOf(row), 1);
+        if (row.totpId > 0 && view.month === latestMonth()) skipTotp(row.totpId, true);
+        touch(); render();
+      }
     } });
     menu(btn, items);
   }
@@ -825,6 +852,8 @@
         }
         if (!r.ok || !d.ok) { err.textContent = d.error || '添加失败，请重试。'; return false; }
         useContext(d); totpId = d.id;
+        skipTotp(totpId, !toLedger.checked);
+        if (!toLedger.checked) touch();
       }
       if (toLedger.checked && sheet) {
         made = fixRow({ account: n, group: sheet.grouped && g ? g.id : '', totpId });
@@ -1145,6 +1174,19 @@
     if (!r2.ok || !d2.ok) return alertBox(d2.error || '恢复失败');
     adopt(d2);
   }
+  async function resyncTotp() {
+    if (S.months[latestMonth()].archived) return alertBox('最新的月份已归档，没有进行中的月份可以同步。');
+    const hidden = (S.totpSkip || []).length;
+    if (!await confirmBox('重新同步验证码账号', '把验证码账号里登记的账号全部同步到 ' + ymLabel(latestMonth()) + ' 的 AI 合租里。\n\n已经在账本里的不会重复添加。' + (hidden ? '\n之前你从账本里删掉或取消关联过的 ' + hidden + ' 个账号，也会重新加回来。' : ''), '同步')) return;
+    await refreshContext();
+    S.totpSkip = [];
+    const changed = linkTotp() | syncFromTotp();
+    view.month = latestMonth();
+    const sheet = S.sheets.find(s => s.grouped) || S.sheets.find(s => s.mode === 'members'); if (sheet) view.tab = sheet.id;
+    if (changed) touch();
+    render(); pollCodes();
+    if (!changed) alertBox('已经是同步的，没有需要添加的账号。');
+  }
   async function logout() {
     await settle(); await refreshContext();
     const f = h('form', { method: 'post', action: '/admin/logout' }, h('input', { type: 'hidden', name: 'csrf_token', value: CSRF }));
@@ -1328,6 +1370,7 @@
           { text: '导入 Excel…', run: () => isEditable() ? pickImport() : alertBox('当前月份已归档。请先切到进行中的月份，或解锁后再导入。') },
           { text: '导出 Excel…', run: exportDialog },
           { text: '导出数据备份（JSON）', run: exportBackup },
+          { text: '重新同步验证码账号', run: resyncTotp },
           { text: '从 JSON 备份恢复…', run: restoreBackup },
           { text: '恢复到某天的版本…', run: historyDialog },
           isLatest && keys.length > 1 ? { text: '删除 ' + ymLabel(view.month), danger: true, run: deleteLatestMonth } : null,
