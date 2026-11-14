@@ -18,6 +18,7 @@
     archive: '<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/>',
     key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>',
     list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    fx: '<path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>',
     gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>',
   };
 
@@ -1436,6 +1437,7 @@
       h('div', { class: 'nav-label', text: '验证码' }),
       link('/admin/dashboard', '验证码账号', 'key', A.length), link('/admin/logs', '访问记录', 'list'), link('/admin/settings', '设置', 'gear'),
       h('div', { class: 'side-foot' }, statusEl,
+        h('button', { class: 'nav', type: 'button', 'data-fx-toggle': '1', title: '汇率计算器' }, icon('fx'), h('span', { text: '汇率计算器' })),
         h('button', { class: 'nav', type: 'button', onclick: e => menu(e.currentTarget, [
           { text: '导入 Excel…', run: () => isEditable() ? pickImport() : alertBox('当前月份已归档。请先切到进行中的月份，或解锁后再导入。') },
           { text: '导出 Excel…', run: exportDialog },
@@ -1468,6 +1470,7 @@
     countryList();
     setKids(document.getElementById('app'), h('div', { class: 'shell' }, side, h('main', { class: 'main' }, top, body)));
     recalc(); applySearch(); paintCodes();
+    if (window.hzFx) window.hzFx.sync();
   }
   load().catch(e => {
     console.error(e);

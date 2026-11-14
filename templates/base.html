@@ -32,6 +32,7 @@
 {%- elif name == 'key' %}<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>
 {%- elif name == 'list' %}<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
 {%- elif name == 'gear' %}<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>
+{%- elif name == 'fx' %}<path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>
 {%- elif name == 'out' %}<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>
 {%- endif %}</svg>
 {%- endmacro %}
@@ -57,6 +58,7 @@
   <a class="nav{% if here == 'access_logs' %} on{% endif %}" href="{{ url_for('access_logs') }}">{{ icon('list') }}<span>访问记录</span></a>
   <a class="nav{% if here == 'settings' %} on{% endif %}" href="{{ url_for('settings') }}">{{ icon('gear') }}<span>设置</span></a>
   <div class="side-foot">
+   <button class="nav" type="button" data-fx-toggle title="汇率计算器">{{ icon('fx') }}<span>汇率计算器</span></button>
    <form method="post" action="{{ url_for('logout') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="nav" type="submit">{{ icon('out') }}<span>退出登录</span></button>
@@ -79,6 +81,7 @@
 </main>
 {% endif %}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% if session.admin_id %}<script src="{{ hz_static('hezu/fx.js') }}"></script>{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

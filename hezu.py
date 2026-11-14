@@ -8,6 +8,10 @@
 """
 import json
 import os
+import re
+import threading
+import time
+import urllib.request
 import zlib
 from datetime import datetime, timedelta
 
@@ -21,6 +25,14 @@ API_PREFIX = "/admin/hezu/api/"
 MAX_BODY = 8 * 1024 * 1024       # 账本和导入的 Excel 都比全站 64KB 的上限大
 HISTORY_DAYS = 60
 UNGROUPED_COLOR = "#6c757d"
+
+# 汇率：ExchangeRate-API 的免费接口（不需要密钥，每天更新一次）。页面的安全策略不允许浏览器直接
+# 访问外部网站，所以由服务器去取，并在内存里缓存一小时。
+RATES_URL = "https://open.er-api.com/v6/latest/USD"
+RATES_TTL = 3600            # 缓存多久（秒）
+RATES_RETRY = 300           # 取失败后，至少隔多久再去试
+_rates = {"data": None, "fetched": 0, "tried": 0}
+_rates_lock = threading.Lock()
 
 _core = None   # app 模块，install() 时填入
 
@@ -135,6 +147,41 @@ def static_url(filename):
     return url_for("static", filename=filename, v=version)
 
 
+def fetch_rates():
+    """去数据源取一次汇率，返回 {"base", "rates", "updated"}；任何问题都抛异常。"""
+    req = urllib.request.Request(RATES_URL, headers={"User-Agent": "totp-share/hezu"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        raw = r.read(512 * 1024)
+    d = json.loads(raw.decode("utf-8"))
+    if d.get("result") != "success" or not isinstance(d.get("rates"), dict):
+        raise ValueError("数据源返回的内容不对")
+    rates = {k: float(v) for k, v in d["rates"].items()
+             if isinstance(k, str) and re.fullmatch(r"[A-Z]{3}", k)
+             and isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0}
+    base = d.get("base_code") or "USD"
+    if rates.get(base) != 1 or len(rates) < 10:
+        raise ValueError("数据源返回的内容不对")
+    return {"base": base, "rates": rates, "updated": int(d.get("time_last_update_unix") or 0)}
+
+
+def get_rates():
+    """返回 (数据, 是否是过期的旧数据)；一次都没取到过时返回 (None, False)。"""
+    now = time.time()
+    with _rates_lock:
+        fresh = bool(_rates["data"]) and now - _rates["fetched"] < RATES_TTL
+        # 已经有旧数据时，失败后隔 5 分钟再试；一次都没取到过时，隔 30 秒就可以再试
+        wait = RATES_RETRY if _rates["data"] else 30
+        if not fresh and now - _rates["tried"] >= wait:
+            _rates["tried"] = now
+            try:
+                _rates["data"] = fetch_rates()
+                _rates["fetched"] = now
+                fresh = True
+            except Exception:
+                _core.app.logger.warning("取汇率失败", exc_info=True)
+        return _rates["data"], bool(_rates["data"]) and not fresh
+
+
 def payload(rev, state):
     return dict(ok=True, rev=rev, state=state, csrf=generate_csrf(), **context())
 
@@ -210,6 +257,16 @@ def install(core):
         if rev is None:
             return jsonify(ok=False, error="数据已在别处被修改"), 409
         return jsonify(ok=True, rev=rev, csrf=generate_csrf())
+
+    @app.route(API_PREFIX + "rates")
+    @api_limit
+    @login_required
+    def hezu_rates():
+        data, stale = get_rates()
+        if not data:
+            return jsonify(ok=False, error="暂时取不到汇率，请稍后再试"), 502
+        return jsonify(ok=True, stale=stale, source="ExchangeRate-API",
+                       sourceUrl="https://www.exchangerate-api.com", **data)
 
     @app.route(API_PREFIX + "context")
     @api_limit

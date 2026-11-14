@@ -94,3 +94,36 @@ body.hz tr.sortable-drag { background: var(--panel); }
   body.hz tr.sortable-ghost { background: var(--accent-bg); } body.hz tr.sortable-chosen { background: var(--warn-bg); }
   body.hz .group-dot { box-shadow: none; }
 }
+
+/* —— 汇率计算器（整个后台共用的浮动面板，脚本在 fx.js） —— */
+.side .nav.on[data-fx-toggle] { background: var(--side-on); color: #fff; }
+.fxw { display: none; position: fixed; right: 20px; bottom: 20px; z-index: 1040; width: 360px; max-height: calc(100vh - 40px); overflow: auto;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-pop); font: 14px/1.5 var(--font); }
+.fxw.open { display: block; }
+.fxw-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 8px 16px; }
+.fxw-head b { font-size: 15px; font-weight: 650; }
+.fxw-pill { font-size: 11.5px; color: var(--text2); background: var(--hover); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+.fxw-x { margin-left: auto; border: 0; background: transparent; color: var(--text3); width: 28px; height: 28px; border-radius: 8px; cursor: pointer; font: inherit; }
+.fxw-x:hover { background: var(--hover); color: var(--text); }
+.fxw-body { padding: 0 16px 14px; }
+.fxw-input { display: flex; gap: 8px; margin-bottom: 10px; }
+.fxw-input input, .fxw-input select { border: 1px solid var(--line2); background: var(--panel); color: var(--text); border-radius: 9px; padding: 7px 10px; outline: none; font: inherit; min-width: 0; }
+.fxw-input input { flex: 1; font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.fxw-input input:focus, .fxw-input select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.fxw-list { display: grid; gap: 4px; }
+.fxw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; border: 1px solid transparent;
+  background: var(--head); color: var(--text); border-radius: 10px; padding: 7px 10px; cursor: pointer; font: inherit; }
+.fxw-row:hover { border-color: var(--accent); background: var(--accent-bg); }
+.fxw-row small { display: block; font-size: 11px; color: var(--text3); font-weight: 400; font-variant-numeric: tabular-nums; }
+.fxw-cur b { font-weight: 650; }
+.fxw-val { text-align: right; min-width: 0; }
+.fxw-val b { font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fxw-note { font-size: 11.5px; color: var(--text3); margin-top: 10px; line-height: 1.6; }
+.fxw-note a { color: var(--accent); }
+.fxw-err { color: var(--bad); }
+.fxw-copied { color: var(--good); }
+.fxw-retry { border: 1px solid var(--line2); background: var(--panel); color: var(--text); border-radius: 8px; padding: 2px 10px; cursor: pointer; font: inherit; }
+@media (max-width: 880px) {
+  .fxw { left: 10px; right: 10px; bottom: 10px; width: auto; max-height: 70vh; }
+  .side .side-foot .nav[data-fx-toggle] span { display: none; }
+}

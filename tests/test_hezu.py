@@ -48,7 +48,7 @@ def test_page_and_api_require_login(ctx):
 def test_page_and_nav_link(ctx):
     c = ctx.admin()
     html = call(c, "get", "/admin/hezu").get_data(as_text=True)
-    assert "hezu/app.js" in html and 'data-csrf="' in html
+    assert "hezu/app.js" in html and "hezu/fx.js" in html and 'data-csrf="' in html
     assert "/admin/hezu" in call(c, "get", "/admin/dashboard").get_data(as_text=True)
 
 
@@ -300,6 +300,7 @@ def test_totp_pages_share_the_ledger_sidebar(ctx):
                          ("/admin/accounts/new", "验证码账号")):
         html = call(c, "get", path).get_data(as_text=True)
         assert 'class="side"' in html and "hezu/shell.css" in html and "navbar" not in html
+        assert "hezu/fx.js" in html and "data-fx-toggle" in html          # 每个页面都能打开汇率计算器
         assert 'href="/admin/hezu#ai"' in html and 'href="/admin/hezu#cards"' in html
         assert "油管 &amp; 会员" in html and 'href="/admin/hezu#s_&lt;x&gt;"' in html      # 表名、编号都转义
         on = html.split('class="nav on"', 1)[1].split("</a>", 1)[0]
@@ -317,7 +318,7 @@ def test_public_and_login_pages_have_no_sidebar(ctx):
     c = ctx.client()
     for path in ("/admin/login", "/t/" + token):
         html = call(c, "get", path).get_data(as_text=True)
-        assert 'class="side"' not in html and "/admin/hezu" not in html
+        assert 'class="side"' not in html and "/admin/hezu" not in html and "fx.js" not in html
     assert "hezu/shell.css" not in call(c, "get", "/t/" + token).get_data(as_text=True)   # 分享页样式不变
 
 
@@ -367,3 +368,80 @@ def test_old_groups_get_an_order_on_upgrade(ctx):
     assert ensure_schema(db) == []          # 列已经在了，补顺序不算结构变更
     assert [r[0] for r in db.execute("SELECT name FROM account_groups ORDER BY sort_order")] == ["老分组甲", "老分组乙"]
     db.close()
+
+
+# ---------- 汇率 ----------
+FAKE_RATES = {"base": "USD", "rates": {"USD": 1.0, "CNY": 7.1, "PHP": 58.0, "NGN": 1500.0, "EUR": 0.9,
+                                       "HKD": 7.8, "GBP": 0.78, "SGD": 1.34, "JPY": 150.0, "AUD": 1.5},
+              "updated": 1794600000}
+
+
+def reset_rates(monkeypatch, fake):
+    import hezu as h
+    monkeypatch.setattr(h, "_rates", {"data": None, "fetched": 0, "tried": 0})
+    calls = []
+    def fetch():
+        calls.append(1)
+        if isinstance(fake, Exception):
+            raise fake
+        return fake
+    monkeypatch.setattr(h, "fetch_rates", fetch)
+    return calls
+
+
+def test_rates_require_login(ctx, monkeypatch):
+    reset_rates(monkeypatch, FAKE_RATES)
+    assert call(ctx.client(), "get", f"{API}/rates").status_code == 401
+
+
+def test_rates_are_cached(ctx, monkeypatch):
+    calls = reset_rates(monkeypatch, FAKE_RATES)
+    c = ctx.admin()
+    for _ in range(3):
+        d = call(c, "get", f"{API}/rates").get_json()
+        assert d["ok"] and d["rates"]["CNY"] == 7.1 and d["base"] == "USD" and d["stale"] is False
+    assert len(calls) == 1                      # 一小时内只去数据源取一次
+
+
+def test_rates_fall_back_to_cached_copy(ctx, monkeypatch):
+    import hezu as h
+    calls = reset_rates(monkeypatch, FAKE_RATES)
+    c = ctx.admin()
+    call(c, "get", f"{API}/rates")
+    h._rates["fetched"] -= h.RATES_TTL + 1       # 缓存过期
+    monkeypatch.setattr(h, "fetch_rates", lambda: (_ for _ in ()).throw(OSError("network down")))
+    d = call(c, "get", f"{API}/rates").get_json()
+    assert d["ok"] and d["stale"] is True and d["rates"]["PHP"] == 58.0
+    assert len(calls) == 1
+
+
+def test_rates_unavailable(ctx, monkeypatch):
+    reset_rates(monkeypatch, OSError("network down"))
+    r = call(ctx.admin(), "get", f"{API}/rates")
+    assert r.status_code == 502 and r.get_json()["ok"] is False
+
+
+def test_fetch_rates_validates_the_source(ctx, monkeypatch):
+    import hezu as h
+
+    class Resp:
+        def __init__(self, body): self.body = body
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self, n): return self.body
+
+    def serve(obj):
+        monkeypatch.setattr(h.urllib.request, "urlopen", lambda req, timeout: Resp(json.dumps(obj).encode()))
+
+    good = {"result": "success", "base_code": "USD", "time_last_update_unix": 5,
+            "rates": dict(FAKE_RATES["rates"], bad="x", XX=1, ZZZ=-3, YYY=True)}
+    serve(good)
+    d = h.fetch_rates()
+    assert d["updated"] == 5 and "XX" not in d["rates"] and "ZZZ" not in d["rates"] and "YYY" not in d["rates"]
+    for bad in ({"result": "error"}, {"result": "success", "base_code": "USD", "rates": {"USD": 1}}):
+        serve(bad)
+        try:
+            h.fetch_rates()
+            assert False, "should have raised"
+        except ValueError:
+            pass
