@@ -211,6 +211,8 @@
       const o = Object.assign(newVps(), v);
       if (!Array.isArray(o.tags)) o.tags = [];
       if ('deploy' in o) { if (o.deploy && !o.tags.length) o.tags = splitTags(o.deploy); delete o.deploy; changed = true; }
+      if (o.tags.some(t => typeof t !== 'object' || !t)) changed = true;
+      o.tags = o.tags.map(tagObj).filter(t => t.name);
       return o;
     });
     if (!view.month || !S.months[view.month]) view.month = latestMonth();
@@ -285,6 +287,9 @@
   function newVps() { return { id: uid(), host: '', site: '', ip: '', port: '', password: '', tags: [], traffic: '', renew: '', price: '', email: '', loginPassword: '' }; }
   const VPS_DUE_DAYS = 30;   // 一个月内要续费的 VPS 整行标黄
   function splitTags(t) { return String(t || '').split(/[，,、/;；|\n]+/).map(x => x.trim()).filter((x, i, a) => x && a.indexOf(x) === i); }
+  // 部署标签：{ name: 项目名, url: 这个项目的网址（可空） }；老数据里是纯文字
+  function tagObj(t) { return typeof t === 'object' && t ? { name: String(t.name || '').trim(), url: String(t.url || '').trim() } : { name: String(t || '').trim(), url: '' }; }
+  const tagNames = v => (v.tags || []).map(t => tagObj(t).name);
   function income(sheet, r) { return sheet.mode === 'members' ? r.members.reduce((a, m) => a + num(m.amount), 0) : num(r.unitPrice) * num(r.count); }
   function heads(sheet, r) { return sheet.mode === 'members' ? r.members.length : num(r.count); }
   const zero = () => ({ n: 0, heads: 0, income: 0, cost: 0, profit: 0 });
@@ -1118,23 +1123,48 @@
     draw(false);
     return wrap;
   }
+  function editTag(anchor, v, i, done) {
+    const t = v.tags[i];
+    const name = h('input', { type: 'text', value: t.name, placeholder: '项目名' });
+    const url = h('input', { type: 'text', value: t.url, placeholder: 'https://… 可不填', spellcheck: false, autocomplete: 'off' });
+    let removed = false;
+    const form = h('div', { class: 'form tagform' },
+      h('label', { class: 'field' }, '项目名', name),
+      h('label', { class: 'field' }, '网址（点标签时打开）', url),
+      h('div', { class: 'rowbtns' },
+        h('button', { class: 'btn small danger', type: 'button', text: '删除', onclick: () => { removed = true; closePop(); } }),
+        h('button', { class: 'btn small primary', type: 'button', text: '完成', onclick: closePop })));
+    form.addEventListener('keydown', e => { if (e.key === 'Enter') closePop(); });
+    openPop(anchor, form, () => {
+      if (removed || !name.value.trim()) v.tags.splice(i, 1);
+      else { t.name = name.value.trim(); t.url = fixUrl(url.value); }
+      touch(); done();
+    });
+    (t.url ? name : url).focus();
+  }
   function tagsField(v) {
     const box = h('div', { class: 'vtags' });
     function draw(focus) {
       const add = h('input', { class: 'vtag-add', type: 'text', placeholder: v.tags.length ? '+' : '+ 项目', 'aria-label': '添加部署项目', autocomplete: 'off', title: '输入项目名回车；可以一次填多个，用逗号隔开' });
       const commit = refocus => {
-        const list = splitTags(add.value); add.value = '';
-        const fresh = list.filter(t => !v.tags.includes(t));
+        const fresh = splitTags(add.value).filter(n => !v.tags.some(t => t.name === n)); add.value = '';
         if (!fresh.length) return;
-        v.tags.push(...fresh); touch(); draw(refocus);
+        v.tags.push(...fresh.map(n => ({ name: n, url: '' }))); touch(); draw(refocus);
       };
       add.addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); commit(true); }
         else if (e.key === 'Backspace' && !add.value && v.tags.length) { v.tags.pop(); touch(); draw(true); }
       });
       add.addEventListener('blur', () => commit(false));
-      setKids(box, v.tags.map((t, i) => h('span', { class: 'vtag ' + hashColor(t) }, h('span', { text: t }),
-        h('button', { type: 'button', 'aria-label': '去掉 ' + t, title: '去掉', onclick: () => { v.tags.splice(i, 1); touch(); draw(); } }, '✕'))), add);
+      setKids(box, v.tags.map((t, i) => {
+        const chip = h('span', { class: 'vtag ' + hashColor(t.name) + (t.url ? ' linked' : '') });
+        const edit = h('button', { class: 'vtag-edit', type: 'button', title: '改名字或网址', 'aria-label': '修改 ' + t.name, onclick: () => editTag(chip, v, i, () => draw()) }, icon('pen', 11));
+        chip.append(t.url
+          ? h('a', { class: 'vtag-name', href: fixUrl(t.url), target: '_blank', rel: 'noopener noreferrer', title: '打开 ' + fixUrl(t.url) }, h('span', { text: t.name }), icon('link', 11))
+          : h('button', { class: 'vtag-name', type: 'button', title: '还没有网址，点一下填', onclick: () => editTag(chip, v, i, () => draw()) }, h('span', { text: t.name })),
+          edit);
+        return chip;
+      }), add);
       if (focus) add.focus();
     }
     draw(false);
@@ -1216,7 +1246,7 @@
     }
     for (const v of S.vps) {
       const d = daysUntil(v.renew); if (d == null || d > VPS_DUE_DAYS) continue;
-      items.push({ d, title: v.host || '未命名 VPS', meta: ['VPS', (v.tags || []).join('、')].filter(Boolean).join(' · '), cost: v.price || '', action: h('button', { class: 'btn ghost small', type: 'button', text: '去修改', onclick: () => { view.tab = 'vps'; render(); } }) });
+      items.push({ d, title: v.host || '未命名 VPS', meta: ['VPS', tagNames(v).join('、')].filter(Boolean).join(' · '), cost: v.price || '', action: h('button', { class: 'btn ghost small', type: 'button', text: '去修改', onclick: () => { view.tab = 'vps'; render(); } }) });
     }
     items.sort((a, b) => a.d - b.d);
     return h('div', { class: 'group' },
@@ -1525,7 +1555,7 @@
     const cardRows = [];
     for (const it of S.issuers) { const own = cardsOf(it.id); if (!own.length) cardRows.push([it.name, it.country || '', '', '']); own.forEach(c => cardRows.push([it.name, it.country || '', c.number || '', c.note || ''])); }
     out.push({ name: '支付卡', head: ['卡信息', '国家 / 地区', '卡号', '备注'], rows: cardRows });
-    out.push({ name: 'VPS', head: ['主机', '官网', 'IP', '端口', '密码', '部署', '流量及重置', '续费', '价格', '邮箱', '登录密码'], rows: S.vps.map(v => [v.host, v.site, v.ip, v.port, v.password, (v.tags || []).join('，'), v.traffic, D(v.renew), v.price, v.email, v.loginPassword]) });
+    out.push({ name: 'VPS', head: ['主机', '官网', 'IP', '端口', '密码', '部署', '流量及重置', '续费', '价格', '邮箱', '登录密码'], rows: S.vps.map(v => [v.host, v.site, v.ip, v.port, v.password, tagNames(v).join('，'), v.traffic, D(v.renew), v.price, v.email, v.loginPassword]) });
     return out;
   }
   function download(blob, name) {
