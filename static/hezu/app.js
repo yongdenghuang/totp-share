@@ -282,7 +282,8 @@
     if (row.totpId > 0 && totpById(row.totpId) && !S.months[view.month].archived) { pushGroup(row.totpId, groupId); pullGroups(); }
     touch(); render();
   }
-  function newVps() { return { id: uid(), host: '', site: '', ip: '', port: '', password: '', tags: [], traffic: '', renew: '', price: '', email: '' }; }
+  function newVps() { return { id: uid(), host: '', site: '', ip: '', port: '', password: '', tags: [], traffic: '', renew: '', price: '', email: '', loginPassword: '' }; }
+  const VPS_DUE_DAYS = 30;   // 一个月内要续费的 VPS 整行标黄
   function splitTags(t) { return String(t || '').split(/[，,、/;；|\n]+/).map(x => x.trim()).filter((x, i, a) => x && a.indexOf(x) === i); }
   function income(sheet, r) { return sheet.mode === 'members' ? r.members.reduce((a, m) => a + num(m.amount), 0) : num(r.unitPrice) * num(r.count); }
   function heads(sheet, r) { return sheet.mode === 'members' ? r.members.length : num(r.count); }
@@ -1111,9 +1112,7 @@
         if (edit) { inp.focus(); inp.select(); }
         return;
       }
-      let label = v.site;
-      try { label = new URL(v.site).hostname.replace(/^www\./, ''); } catch (e) { /* 原样显示 */ }
-      setKids(wrap, h('a', { class: 'site-link', href: fix(v.site), target: '_blank', rel: 'noopener noreferrer', title: '打开 ' + v.site }, icon('link', 13), h('span', { text: label })),
+      setKids(wrap, h('a', { class: 'site-link', href: fix(v.site), target: '_blank', rel: 'noopener noreferrer', title: '打开 ' + fix(v.site) }, h('span', { text: '官网' }), icon('link', 13)),
         h('button', { class: 'cf-edit', type: 'button', title: '修改官网网址', 'aria-label': '修改官网网址', onclick: () => draw(true) }, icon('pen', 13)));
     }
     draw(false);
@@ -1164,36 +1163,41 @@
       sub[2].textContent = RATES ? '1 USD = ' + RATES.rates.CNY.toFixed(4) + ' CNY · 每天更新' : '正在取汇率…';
       const next = S.vps.map(x => ({ x, d: daysUntil(x.renew) })).filter(o => o.d != null).sort((a, b) => a.d - b.d)[0];
       v[3].textContent = next ? (next.x.host || '未命名') : '—';
-      sub[3].textContent = next ? dateText(next.x.renew) + ' · ' + relText(next.d) : '还没有填续费日期';
+      const soon = S.vps.filter(x => { const d = daysUntil(x.renew); return d != null && d <= VPS_DUE_DAYS; }).length;
+      sub[3].textContent = next ? dateText(next.x.renew) + ' · ' + relText(next.d) + (soon ? ' · 30 天内共 ' + soon + ' 台' : '') : '还没有填续费日期';
+      t[3].classList.toggle('warn', !!next && next.d >= 0 && next.d <= VPS_DUE_DAYS);
       t[3].classList.toggle('bad', !!next && next.d < 0);
     });
     return h('div', { class: 'tiles' }, t);
   }
   function vpsView() {
     ensureRates();
-    const cols = [['主机', 180], ['官网', 116], ['IP', 148], ['端口', 62], ['密码', 104], ['部署', 0], ['流量及重置', 80], ['续费', 140], ['价格', 108], ['', 40]];
+    const cols = [['主机', 0], ['官网', 86], ['IP', 152], ['端口', 64], ['密码', 104], ['部署', 236], ['流量及重置', 88], ['续费', 150], ['价格', 112], ['邮箱', 196], ['登录密码', 104], ['', 40]];
     const body = S.vps.map(v => {
       const cnyEl = h('div', { class: 'cny' });
       updaters.push(() => { const u = priceUsd(v.price), c = u == null ? null : usdToCny(u); cnyEl.textContent = c == null ? '' : '≈ ' + money(c); });
-      return h('tr', null,
+      const d = daysUntil(v.renew);
+      return h('tr', { class: d == null ? '' : d < 0 ? 'overdue' : d <= VPS_DUE_DAYS ? 'due-soon' : '' },
         h('td', null, h('div', { class: 'hostcell' }, h('span', { class: 'avatar ' + hashColor(v.host || '?'), text: (Array.from(v.host || '?')[0] || '?').toUpperCase(), 'aria-hidden': 'true' }),
-          h('div', { class: 'hostlines' }, cell(v, 'host', { cls: 'strong', label: '主机', placeholder: '主机名' }), cell(v, 'email', { cls: 'sub', label: '注册邮箱', placeholder: '注册邮箱' })))),
+          cell(v, 'host', { cls: 'strong', label: '主机', placeholder: '主机名', title: v.host }))),
         h('td', null, siteField(v)),
         h('td', null, copyField(v, 'ip', { mono: true, label: ' IP', placeholder: 'IP' })),
         h('td', null, cell(v, 'port', { cls: 'mono', label: '端口', placeholder: '端口' })),
         h('td', null, copyField(v, 'password', { mask: true, label: '密码', placeholder: '密码' })),
         h('td', null, tagsField(v)),
         h('td', null, cell(v, 'traffic', { label: '流量及重置' })),
-        h('td', null, dateCell(v, 'renew', false, 14, true)),
+        h('td', null, dateCell(v, 'renew', false, VPS_DUE_DAYS, true)),
         h('td', null, h('div', { class: 'price' }, cell(v, 'price', { right: true, label: '价格', placeholder: '$0' }), cnyEl)),
+        h('td', null, cell(v, 'email', { label: '注册邮箱', placeholder: '注册邮箱', title: v.email })),
+        h('td', null, copyField(v, 'loginPassword', { mask: true, label: '登录密码', placeholder: '登录密码' })),
         h('td', null, h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => vpsMenu(e.currentTarget, v) }, icon('more'))));
     });
     return [
       vpsTiles(),
       h('div', { class: 'group vps' },
         h('div', { class: 'group-head' }, h('span', { class: 'group-title', text: '全部主机' }), h('span', { class: 'pill', text: S.vps.length + ' 台' }),
-          h('span', { class: 'group-sum', text: '点 IP、密码复制 · 部署项目回车添加 · 14 天内到期会标出来' })),
-        S.vps.length ? h('div', { class: 'scroll' }, h('table', { class: 'grid', style: 'min-width:1130px;table-layout:fixed' },
+          h('span', { class: 'group-sum' }, h('span', { class: 'due-key' }), '30 天内要续费 · 点 IP、密码复制 · 部署项目回车添加')),
+        S.vps.length ? h('div', { class: 'scroll' }, h('table', { class: 'grid', style: 'min-width:1540px;table-layout:fixed' },
           h('colgroup', null, cols.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
           h('thead', null, h('tr', null, cols.map(c => h('th', { class: c[0] === '价格' ? 'r' : '', text: c[0] })))), h('tbody', null, body))) : h('div', { class: 'empty', text: '还没有 VPS。' }),
         h('div', { class: 'group-foot' }, h('button', { class: 'btn ghost small', type: 'button', onclick: () => { S.vps.push(newVps()); touch(); render(); const ins = document.querySelectorAll('.vps tbody tr:last-child input'); if (ins[0]) ins[0].focus(); } }, icon('plus', 15), '添加 VPS'))),
@@ -1211,12 +1215,12 @@
         action: h('button', { class: 'btn small', type: 'button', text: '已续费', title: '续费日期顺延一个月', onclick: () => { r.renew = shiftMonth(r.renew, 1); touch(); render(); } }) });
     }
     for (const v of S.vps) {
-      const d = daysUntil(v.renew); if (d == null || d > 14) continue;
+      const d = daysUntil(v.renew); if (d == null || d > VPS_DUE_DAYS) continue;
       items.push({ d, title: v.host || '未命名 VPS', meta: ['VPS', (v.tags || []).join('、')].filter(Boolean).join(' · '), cost: v.price || '', action: h('button', { class: 'btn ghost small', type: 'button', text: '去修改', onclick: () => { view.tab = 'vps'; render(); } }) });
     }
     items.sort((a, b) => a.d - b.d);
     return h('div', { class: 'group' },
-      h('div', { class: 'group-head' }, h('span', { class: 'group-title', text: '待续费' }), h('span', { class: 'pill', text: items.length + ' 项' }), h('span', { class: 'group-sum', text: '账号 7 天内、VPS 14 天内到期' })),
+      h('div', { class: 'group-head' }, h('span', { class: 'group-title', text: '待续费' }), h('span', { class: 'pill', text: items.length + ' 项' }), h('span', { class: 'group-sum', text: '账号 7 天内、VPS 30 天内到期' })),
       items.length ? items.map(x => h('div', { class: 'due' }, h('span', { class: 'd-rel ' + (x.d < 0 ? 'late' : 'soon'), text: relText(x.d) }),
         h('div', { style: 'min-width:0' }, h('div', { class: 't', text: x.title }), h('div', { class: 'm', text: x.meta })), h('span', { class: 'cost num muted', text: x.cost }), x.action))
         : h('div', { class: 'empty', text: '近期没有要续费的。' }));
@@ -1521,7 +1525,7 @@
     const cardRows = [];
     for (const it of S.issuers) { const own = cardsOf(it.id); if (!own.length) cardRows.push([it.name, it.country || '', '', '']); own.forEach(c => cardRows.push([it.name, it.country || '', c.number || '', c.note || ''])); }
     out.push({ name: '支付卡', head: ['卡信息', '国家 / 地区', '卡号', '备注'], rows: cardRows });
-    out.push({ name: 'VPS', head: ['主机', '官网', 'IP', '端口', '密码', '部署', '流量及重置', '续费', '价格', '邮箱'], rows: S.vps.map(v => [v.host, v.site, v.ip, v.port, v.password, (v.tags || []).join('，'), v.traffic, D(v.renew), v.price, v.email]) });
+    out.push({ name: 'VPS', head: ['主机', '官网', 'IP', '端口', '密码', '部署', '流量及重置', '续费', '价格', '邮箱', '登录密码'], rows: S.vps.map(v => [v.host, v.site, v.ip, v.port, v.password, (v.tags || []).join('，'), v.traffic, D(v.renew), v.price, v.email, v.loginPassword]) });
     return out;
   }
   function download(blob, name) {
