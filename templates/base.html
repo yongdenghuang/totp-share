@@ -32,6 +32,7 @@
 {%- elif name == 'key' %}<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>
 {%- elif name == 'list' %}<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
 {%- elif name == 'gear' %}<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>
+{%- elif name == 'bolt' %}<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>
 {%- elif name == 'fx' %}<path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>
 {%- elif name == 'out' %}<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>
 {%- endif %}</svg>
@@ -47,7 +48,7 @@
   <a class="nav" href="{{ ledger }}#home">{{ icon('grid') }}<span>总览</span></a>
   <div class="nav-label">账号</div>
   {% for s in nav.sheets %}
-  <a class="nav" href="{{ ledger }}#{{ s.id }}">{{ icon('users' if s.grouped else 'play') }}<span>{{ s.name }}</span><span class="count">{{ s.count }}</span></a>
+  <a class="nav" href="{{ ledger }}#{{ s.id }}">{{ icon('users' if s.grouped else 'bolt' if s.resale else 'play') }}<span>{{ s.name }}</span><span class="count">{{ s.count }}</span></a>
   {% endfor %}
   <a class="nav" href="{{ ledger }}#new-sheet" title="新建一张表">{{ icon('plus') }}<span>新建表</span></a>
   <div class="nav-label">后台</div>

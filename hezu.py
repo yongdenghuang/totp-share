@@ -130,6 +130,7 @@ def shell_nav():
     months = sorted(k for k, v in state.get("months", {}).items() if isinstance(v, dict))
     rows = (state["months"][months[-1]].get("rows") or {}) if months else {}
     sheets = [{"id": str(s["id"]), "name": str(s.get("name") or ""), "grouped": bool(s.get("grouped")),
+               "resale": s.get("mode") == "resale",
                "count": len(rows.get(s["id"]) or [])}
               for s in state.get("sheets", []) if isinstance(s, dict) and s.get("id")]
     accounts = _core.query_one("SELECT COUNT(*) AS n FROM accounts")["n"]

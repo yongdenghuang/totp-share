@@ -18,6 +18,7 @@
     archive: '<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/>',
     key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>',
     list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
     pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
     link: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
     fx: '<path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>',
@@ -166,7 +167,7 @@
     const byIssuer = {}, byCard = {}, none = { n: 0, cost: 0 };
     const M = S.months[ym];
     for (const sh of S.sheets) for (const r of (M.rows[sh.id] || [])) {
-      const c = num(r.cost);
+      const c = rowCost(sh, r);
       if (!r.issuerId) { if (c) { none.n++; none.cost += c; } continue; }
       const a = byIssuer[r.issuerId] || (byIssuer[r.issuerId] = { n: 0, cost: 0 }); a.n++; a.cost += c;
       if (r.cardId) { const b = byCard[r.cardId] || (byCard[r.cardId] = { n: 0, cost: 0 }); b.n++; b.cost += c; }
@@ -181,7 +182,7 @@
       id: r.id || uid(), group: r.group || '', account: r.account || '', renew: r.renew || '',
       issuerId: r.issuerId || '', cardId: r.cardId || '', totpId: Number(r.totpId) || 0,
       members: (r.members || []).map(m => ({ name: m.name || '', amount: num(m.amount), paid: !!m.paid })),
-      unitPrice: num(r.unitPrice), count: num(r.count), cost: num(r.cost), note: r.note || '', stopped: !!r.stopped,
+      unitPrice: num(r.unitPrice), unitCost: num(r.unitCost), count: num(r.count), cost: num(r.cost), note: r.note || '', stopped: !!r.stopped,
     };
     if (!o.issuerId && (r.cardInfo || r.cardNo)) { o.cardInfo = String(r.cardInfo || ''); o.cardNo = String(r.cardNo || ''); }
     return o;
@@ -290,12 +291,14 @@
   // 部署标签：{ name: 项目名, url: 这个项目的网址（可空） }；老数据里是纯文字
   function tagObj(t) { return typeof t === 'object' && t ? { name: String(t.name || '').trim(), url: String(t.url || '').trim() } : { name: String(t || '').trim(), url: '' }; }
   const tagNames = v => (v.tags || []).map(t => tagObj(t).name);
+  // 表的收费方式：members = 每人单独填金额；unit = 单价 × 人数；resale = 代充（售价、成本/份固定，按数量算）
+  function rowCost(sheet, r) { return sheet.mode === 'resale' ? num(r.unitCost) * num(r.count) : num(r.cost); }
   function income(sheet, r) { return sheet.mode === 'members' ? r.members.reduce((a, m) => a + num(m.amount), 0) : num(r.unitPrice) * num(r.count); }
   function heads(sheet, r) { return sheet.mode === 'members' ? r.members.length : num(r.count); }
   const zero = () => ({ n: 0, heads: 0, income: 0, cost: 0, profit: 0 });
   function stats(sheet, rows) {
     const s = zero();
-    for (const r of rows) { if (!r.stopped) s.n++; s.heads += heads(sheet, r); s.income += income(sheet, r); s.cost += num(r.cost); }
+    for (const r of rows) { if (!r.stopped) s.n++; s.heads += heads(sheet, r); s.income += income(sheet, r); s.cost += rowCost(sheet, r); }
     s.profit = s.income - s.cost;
     return s;
   }
@@ -765,9 +768,35 @@
     } });
     menu(btn, items);
   }
+  function resaleRowEl(sheet, rows, row, editable) {
+    const per = h('td', { class: 'calc r muted' }), inc = h('td', { class: 'calc r' }), cost = h('td', { class: 'calc r' }), pill = h('span', { class: 'profit' });
+    updaters.push(() => {
+      const i = income(sheet, row), c = rowCost(sheet, row);
+      per.textContent = money(num(row.unitPrice) - num(row.unitCost)); inc.textContent = money(i); cost.textContent = money(c); profitText(pill, i - c);
+    });
+    const countInp = cell(row, 'count', { num: true, ro: !editable, label: '本月数量', cls: 'stepnum' });
+    const step = d => { row.count = Math.max(0, num(row.count) + d); countInp.value = row.count ? plain(row.count) : ''; touch(); recalc(); };
+    const tr = h('tr', { class: row.stopped ? 'stopped' : '' },
+      h('td', null, cell(row, 'account', { ro: !editable, placeholder: '项目名，如 Plus代充', cls: 'strong', label: '项目' })),
+      cardCells(row, editable),
+      h('td', null, cell(row, 'unitPrice', { num: true, ro: !editable, label: '售价' })),
+      h('td', null, cell(row, 'unitCost', { num: true, ro: !editable, label: '成本/份' })),
+      per,
+      h('td', null, h('div', { class: 'stepper' },
+        editable ? h('button', { class: 'step', type: 'button', 'aria-label': '减一单', title: '减一单', onclick: () => step(-1) }, '−') : null,
+        countInp,
+        editable ? h('button', { class: 'step plus', type: 'button', 'aria-label': '加一单', title: '加一单', onclick: () => step(1) }, '+') : null)),
+      inc, cost, h('td', { class: 'calc r' }, pill),
+      h('td', null, cell(row, 'note', { ro: !editable, label: '备注' })),
+      h('td', null, editable ? h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => rowMenu(e.currentTarget, sheet, rows, row) }, icon('more')) : null));
+    tr.dataset.row = row.id;
+    searchRows.push({ tr, row });
+    return tr;
+  }
   function rowEl(sheet, rows, row, editable, live) {
+    if (sheet.mode === 'resale') return resaleRowEl(sheet, rows, row, editable);
     const inc = h('td', { class: 'calc r' }), pill = h('span', { class: 'profit' }), prof = h('td', { class: 'calc r' }, pill);
-    updaters.push(() => { const v = income(sheet, row); inc.textContent = money(v); profitText(pill, v - num(row.cost)); });
+    updaters.push(() => { const v = income(sheet, row); inc.textContent = money(v); profitText(pill, v - rowCost(sheet, row)); });
     const acct = cell(row, 'account', { ro: !editable, placeholder: '账号', cls: 'strong', label: '账号', title: row.stopped ? '已停止，下个月不会带过去' : '' });
     acct.addEventListener('change', () => { if (!row.totpId && linkTotp()) { touch(); render(); } });
     const tr = h('tr', { class: row.stopped ? 'stopped' : '' },
@@ -792,6 +821,13 @@
     return h('div', { class: 'acct-head' }, h('span', { text: label }), el);
   }
   function tableEl(sheet, rows, list, editable, live) {
+    if (sheet.mode === 'resale') {
+      const rc = [['项目', 170], ['付款渠道', 132], ['卡号', 112], ['售价', 86, 1], ['成本/份', 86, 1], ['每单利润', 88, 1], ['本月数量', 130], ['收费', 88, 1], ['成本', 88, 1], ['利润', 98, 1], ['备注', 0], ['', 40]];
+      return h('div', { class: 'scroll' }, h('table', { class: 'grid resale', style: 'min-width:1150px;table-layout:fixed' },
+        h('colgroup', null, rc.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
+        h('thead', null, h('tr', null, rc.map(c => h('th', { class: c[2] ? 'r' : '', text: c[0] })))),
+        h('tbody', null, list.map(r => rowEl(sheet, rows, r, editable, live)))));
+    }
     const cols = [['账号', 240], ['续费日期', 134], ['续费卡信息', 126], ['卡号', 118], [sheet.mode === 'members' ? '收费情况（每人）' : '单价 × 人数', 0], ['收费', 76, 1], ['续费成本', 78, 1], ['利润', 92, 1], ['备注', 88], ['', 42]];
     return h('div', { class: 'scroll' }, h('table', { class: 'grid', style: 'min-width:1170px;table-layout:fixed' },
       h('colgroup', null, cols.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
@@ -807,25 +843,25 @@
       setKids(sum, h('span', null, '收费 ', h('b', { text: money(s.income) })), h('span', null, '成本 ', h('b', { text: money(s.cost) })), profitPill(s.profit));
     });
     const count = h('span', { class: 'pill' });
-    updaters.push(() => { const s = stats(sheet, rows.filter(filter)); count.textContent = list.length + ' 个账号 · ' + plain(s.heads) + ' 人'; });
+    updaters.push(() => { const s = stats(sheet, rows.filter(filter)); count.textContent = sheet.mode === 'resale' ? list.length + ' 个项目 · ' + plain(s.heads) + ' 单' : list.length + ' 个账号 · ' + plain(s.heads) + ' 人'; });
     const toggle = () => { collapsed[key] = !closed; try { localStorage.setItem('hezu-collapsed', JSON.stringify(collapsed)); } catch (e) { /* 忽略 */ } render(); };
     const title = h('button', { class: 'group-title', type: 'button', 'aria-expanded': String(!closed), title: closed ? '展开' : '收起', onclick: toggle },
       h('span', { class: 'chev' }, icon('chev', 16)), group ? h('span', { class: 'dot', style: 'background:' + group.color }) : null, h('span', { text: group ? group.name : sheet.name }));
-    const addBtn = editable && !closed ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => addAccountDialog({ sheet, group }) }, icon('plus', 15), '添加账号') : null;
+    const addBtn = editable && !closed ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => addAccountDialog({ sheet, group }) }, icon('plus', 15), sheet.mode === 'resale' ? '添加项目' : '添加账号') : null;
     return h('div', { class: 'group' + (closed ? ' closed' : '') },
       h('div', { class: 'group-head' }, title, count, sum),
-      closed ? null : list.length ? tableEl(sheet, rows, list, editable, live) : h('div', { class: 'empty', text: editable ? '还没有账号，点下面的“添加账号”。' : '这个月没有账号。' }),
+      closed ? null : list.length ? tableEl(sheet, rows, list, editable, live) : h('div', { class: 'empty', text: sheet.mode === 'resale' ? (editable ? '还没有代充项目，点下面的“添加项目”。' : '这个月没有代充项目。') : editable ? '还没有账号，点下面的“添加账号”。' : '这个月没有账号。' }),
       addBtn ? h('div', { class: 'group-foot' }, addBtn) : null);
   }
-  function tiles(getStats) {
+  function tiles(getStats, resale) {
     const v = [0, 1, 2, 3].map(() => h('div', { class: 'v' })), s3 = h('div', { class: 's' }), s2 = h('div', { class: 's' });
-    const t = ['收费', '续费成本', '利润', '在用账号'].map((k, i) => h('div', { class: 'tile' }, h('div', { class: 'k', text: k }), v[i], i === 3 ? s3 : i === 2 ? s2 : null));
+    const t = (resale ? ['收费', '成本', '利润', '本月单数'] : ['收费', '续费成本', '利润', '在用账号']).map((k, i) => h('div', { class: 'tile' }, h('div', { class: 'k', text: k }), v[i], i === 3 ? s3 : i === 2 ? s2 : null));
     updaters.push(() => {
       const s = getStats();
-      v[0].textContent = money(s.income); v[1].textContent = money(s.cost); v[2].textContent = money(s.profit); v[3].textContent = String(s.n);
+      v[0].textContent = money(s.income); v[1].textContent = money(s.cost); v[2].textContent = money(s.profit); v[3].textContent = resale ? plain(s.heads) : String(s.n);
       t[2].className = 'tile' + (s.profit > 0 ? ' good' : s.profit < 0 ? ' bad' : '');
       s2.textContent = s.income ? '利润率 ' + Math.round(s.profit / s.income * 100) + '%' : ' ';
-      s3.textContent = plain(s.heads) + ' 人付费';
+      s3.textContent = resale ? s.n + ' 个项目' : plain(s.heads) + ' 人付费';
     });
     return h('div', { class: 'tiles' }, t);
   }
@@ -839,7 +875,7 @@
   }
   function sheetView(sheet) {
     const M = S.months[view.month], rows = M.rows[sheet.id], editable = isEditable(), live = view.month === latestMonth() && !M.archived;
-    const out = [tiles(() => stats(sheet, rows))];
+    const out = [tiles(() => stats(sheet, rows), sheet.mode === 'resale')];
     const q = h('input', { type: 'search', placeholder: '搜索账号、备注、卡种', value: view.q, 'aria-label': '搜索' });
     q.addEventListener('input', () => { view.q = q.value; applySearch(); });
     const bar = h('div', { class: 'toolbar' }, h('label', { class: 'search' }, icon('search', 15), q));
@@ -969,6 +1005,7 @@
 
   // Netflix / Spotify / iCloud 这类普通表：只填这张表自己的列，续费卡和收费在表格里接着填
   async function addRowDialog(sheet) {
+    if (sheet.mode === 'resale') return addResaleDialog(sheet);
     const unit = sheet.mode === 'unit';
     const name = h('input', { type: 'text', placeholder: '账号邮箱或名称', autocomplete: 'off', spellcheck: false });
     const renew = h('input', { type: 'date' });
@@ -992,6 +1029,28 @@
     S.months[view.month].rows[sheet.id].push(made);
     linkTotp(); touch(); render();
     const inp = document.querySelector('[data-row="' + made.id + '"] input'); if (inp) inp.scrollIntoView({ block: 'center' });
+  }
+
+  async function addResaleDialog(sheet) {
+    const name = h('input', { type: 'text', placeholder: '如 Plus代充、Pro20x', autocomplete: 'off' });
+    const price = h('input', { type: 'text', inputMode: 'decimal', placeholder: '卖给客户的价格', autocomplete: 'off' });
+    const cost = h('input', { type: 'text', inputMode: 'decimal', placeholder: '每单的进货成本', autocomplete: 'off' });
+    const count = h('input', { type: 'text', inputMode: 'numeric', placeholder: '0', autocomplete: 'off' });
+    const note = h('input', { type: 'text', placeholder: '可不填', autocomplete: 'off' });
+    let made = null;
+    const ok = await dialog('添加代充项目到 ' + sheet.name, [
+      h('label', { class: 'field' }, '项目名', name),
+      h('div', { class: 'field-row' }, h('label', { class: 'field' }, '售价', price), h('label', { class: 'field' }, '成本/份', cost)),
+      h('label', { class: 'field' }, '本月已经代充几单', count),
+      h('label', { class: 'field' }, '备注', note),
+      h('div', { class: 'muted', text: '售价和成本以后每个月自动带过去，只需要在表格里点 + 记单数。付款渠道在表格里选。' }),
+    ], [{ text: '取消' }, { text: '添加', cls: 'primary', value: true, run: () => {
+      if (!name.value.trim()) { name.focus(); return false; }
+      made = fixRow({ account: name.value.trim(), unitPrice: num(price.value), unitCost: num(cost.value), count: num(count.value), note: note.value.trim() });
+    } }]);
+    if (!ok || !made) return;
+    S.months[view.month].rows[sheet.id].push(made);
+    touch(); render();
   }
 
   // ---------- 分组 / 表 管理 ----------
@@ -1018,13 +1077,30 @@
     const name = h('input', { type: 'text', value: sheet ? sheet.name : '', placeholder: '如 YouTube' });
     const mode = h('select', null,
       h('option', { value: 'unit', text: '单价 × 人数（每人价格一样）', selected: !sheet || sheet.mode === 'unit' }),
-      h('option', { value: 'members', text: '每人单独填金额', selected: !!sheet && sheet.mode === 'members' }));
+      h('option', { value: 'members', text: '每人单独填金额', selected: !!sheet && sheet.mode === 'members' }),
+      h('option', { value: 'resale', text: '代充（售价、成本固定，只填每月数量）', selected: !!sheet && sheet.mode === 'resale' }));
     const ok = await dialog(sheet ? '修改表' : '新建表', [h('label', { class: 'field' }, '名称', name), h('label', { class: 'field' }, '收费方式', mode)],
       [{ text: '取消' }, { text: sheet ? '保存' : '新建', cls: 'primary', value: true, run: () => { if (!name.value.trim()) { name.focus(); return false; } } }]);
     if (!ok) return;
-    if (sheet) { sheet.name = name.value.trim(); sheet.mode = mode.value; }
+    if (sheet) { convertSheetMode(sheet, mode.value); sheet.name = name.value.trim(); sheet.mode = mode.value; }
     else { sheet = { id: 's_' + uid(), name: name.value.trim(), mode: mode.value }; S.sheets.push(sheet); view.tab = sheet.id; }
     normalize(); touch(); render();
+  }
+  // 换收费方式时把还在进行的月份的数据换算过去（存档月份保持原样）
+  function convertSheetMode(sheet, to) {
+    const from = sheet.mode;
+    if (from === to) return;
+    for (const ym in S.months) {
+      if (S.months[ym].archived) continue;
+      for (const r of S.months[ym].rows[sheet.id] || []) {
+        if (to === 'resale') {
+          if (from === 'members') { r.unitPrice = r.members.length ? r.members.reduce((a, m) => a + num(m.amount), 0) / r.members.length : 0; r.count = r.members.length; }
+          r.unitCost = num(r.count) ? round2(num(r.cost) / num(r.count)) : num(r.cost);
+        } else if (from === 'resale') {
+          r.cost = round2(num(r.unitCost) * num(r.count));
+        }
+      }
+    }
   }
   function sheetMenu(btn, sheet) {
     menu(btn, [
@@ -1349,12 +1425,13 @@
   // ---------- 月份 ----------
   async function startNextMonth() {
     const last = latestMonth(), next = nextYM(last);
-    if (!await confirmBox('归档并开始下个月', '把 ' + ymLabel(last) + ' 归档，并开始 ' + ymLabel(next) + '？\n\n· 账号、收费金额、成本和续费卡会复制到新月份，之后两个月各改各的\n· 续费日期早于新月份的会顺延到新月份\n· 收款状态全部重置为“未收”\n· 标记为停止的账号不会带过去\n· ' + ymLabel(last) + ' 变成只读存档，需要时可以解锁修改', '归档并开始')) return;
+    if (!await confirmBox('归档并开始下个月', '把 ' + ymLabel(last) + ' 归档，并开始 ' + ymLabel(next) + '？\n\n· 账号、收费金额、成本和续费卡会复制到新月份，之后两个月各改各的\n· 续费日期早于新月份的会顺延到新月份\n· 收款状态全部重置为“未收”，代充表的单数清零\n· 标记为停止的账号不会带过去\n· ' + ymLabel(last) + ' 变成只读存档，需要时可以解锁修改', '归档并开始')) return;
     const src = S.months[last], rows = {}, floor = next + '-01';
     for (const sh of S.sheets) rows[sh.id] = (src.rows[sh.id] || []).filter(r => !r.stopped).map(r => {
       const c = fixRow(JSON.parse(JSON.stringify(r))); c.id = uid();
       for (let i = 0; i < 36 && isISO(c.renew) && c.renew < floor; i++) c.renew = shiftMonth(c.renew, 1);
       c.members.forEach(m => { m.paid = false; });
+      if (sh.mode === 'resale') c.count = 0;
       return c;
     });
     src.archived = true; S.months[next] = { archived: false, rows }; view.month = next; render(); saveNow();
@@ -1564,10 +1641,10 @@
           const g = G.find(x => x.id === r.group), it = issuerById(r.issuerId), c = cardById(r.cardId), inc = income(sh, r);
           rows.push(M(ym).concat(sh.grouped ? [g ? g.name : '未分组'] : [], [r.account, D(r.renew), it ? it.name : '', it ? it.country || '' : '', c ? cardLabel(c, true) : ''],
             members ? [r.members.map(m => (m.name || '') + plain(m.amount)).join(' + '), r.members.length] : [num(r.unitPrice), num(r.count)],
-            [inc, num(r.cost), inc - num(r.cost), r.note, r.stopped ? '已停止' : '']));
+            sh.mode === 'resale' ? [num(r.unitCost), inc, rowCost(sh, r), inc - rowCost(sh, r), r.note] : [inc, num(r.cost), inc - num(r.cost), r.note, r.stopped ? '已停止' : '']));
         }
       }
-      out.push({ name: sh.name, head: MH.concat(sh.grouped ? ['分组'] : [], ['账号', '续费日期', '续费卡信息', '国家 / 地区', '卡号'], members ? ['收费情况（每人）', '收费人数'] : ['单价', '人数'], ['收费', '续费成本', '利润', '备注', '状态']), rows });
+      out.push({ name: sh.name, head: MH.concat(sh.grouped ? ['分组'] : [], [sh.mode === 'resale' ? '项目' : '账号', '续费日期', sh.mode === 'resale' ? '付款渠道' : '续费卡信息', '国家 / 地区', '卡号'], members ? ['收费情况（每人）', '收费人数'] : sh.mode === 'resale' ? ['售价', '数量'] : ['单价', '人数'], sh.mode === 'resale' ? ['成本/份', '收费', '成本', '利润', '备注'] : ['收费', '续费成本', '利润', '备注', '状态']), rows });
     }
     const spend = [];
     for (const ym of months) {
@@ -1609,6 +1686,32 @@
 
 
   // ---------- 页面 ----------
+  // 左侧的表可以拖动调整顺序（顺序存在账本里，验证码页面的导航也跟着变）
+  let dragSheet = null;
+  function dragSheetNav(el, sh) {
+    el.draggable = true;
+    el.title = '拖动可以调整顺序';
+    const clear = () => document.querySelectorAll('.side .drop-before, .side .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+    const after = e => { const r = el.getBoundingClientRect(); return window.innerWidth <= 880 ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2; };
+    el.addEventListener('dragstart', e => { dragSheet = sh.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', sh.id); });
+    el.addEventListener('dragend', () => { dragSheet = null; el.classList.remove('dragging'); clear(); });
+    el.addEventListener('dragover', e => {
+      if (!dragSheet || dragSheet === sh.id) return;
+      e.preventDefault();
+      const a = after(e); el.classList.toggle('drop-after', a); el.classList.toggle('drop-before', !a);
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drop-before', 'drop-after'));
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      const a = el.classList.contains('drop-after'), from = dragSheet;
+      clear();
+      if (!from || from === sh.id) return;
+      const moved = S.sheets.find(x => x.id === from), list = S.sheets.filter(x => x.id !== from);
+      list.splice(list.findIndex(x => x.id === sh.id) + (a ? 1 : 0), 0, moved);
+      S.sheets = list; touch(); render();
+    });
+    return el;
+  }
   function render() {
     closePop(); updaters = []; searchRows = []; codes.els = []; codes.timers = [];
     if (location.hash.slice(1) !== view.tab && !location.search) history.replaceState(null, '', '#' + view.tab);
@@ -1625,7 +1728,7 @@
       h('div', { class: 'brand' }, h('div', { class: 'logo', text: '租' }), h('span', { text: '合租管理' })),
       nav('home', '总览', 'grid'),
       h('div', { class: 'nav-label', text: '账号' }),
-      S.sheets.map(s => nav(s.id, s.name, s.grouped ? 'users' : 'play', M.rows[s.id].length)),
+      S.sheets.map(s => dragSheetNav(nav(s.id, s.name, s.grouped ? 'users' : s.mode === 'resale' ? 'bolt' : 'play', M.rows[s.id].length), s)),
       h('button', { class: 'nav', type: 'button', title: '新建一张表', onclick: () => sheetForm(null) }, icon('plus'), h('span', { text: '新建表' })),
       h('div', { class: 'nav-label', text: '后台' }),
       nav('cards', '支付卡', 'card', S.cards.length), nav('vps', 'VPS', 'server', S.vps.length),
