@@ -27,7 +27,8 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=True,
-    PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
+    # 勾了「记住这台设备」的登录用长期 cookie；没勾的是关浏览器就失效的 cookie，外加 30 分钟无操作退出
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
     WTF_CSRF_TIME_LIMIT=3600,
     MAX_CONTENT_LENGTH=64 * 1024,
 )
@@ -68,6 +69,8 @@ TOTP_STEP = 30
 # 管理员无操作多久后需要重新登录。列表页自动刷新验证码的请求不算"操作"，
 # 否则开着页面就永远不会过期。
 ADMIN_IDLE_SECONDS = 30 * 60
+# 勾了「记住这台设备」：30 天内打开就直接进入（每次使用都会顺延）
+REMEMBER_SECONDS = 30 * 86400
 # 访问记录：同一访客在这段时间内的连续访问合并成一条
 LOG_MERGE_SECONDS = 300
 LOG_RETENTION_DAYS = 180
@@ -313,14 +316,43 @@ def set_security_headers(resp):
     return resp
 
 # ---------- 登录装饰器 ----------
+def _session_fingerprint(pw_hash):
+    """管理员密码的指纹。记在会话里，改了管理员密码之后，其他设备上记住的登录全部失效。"""
+    return hashlib.sha256(("admin-session:" + (pw_hash or "")).encode()).hexdigest()[:16]
+
+def admin_session_valid():
+    """当前浏览器的管理员登录是否还有效；无效时顺手清掉。"""
+    if not session.get("admin_id"):
+        return False
+    now = int(time.time())
+    limit = REMEMBER_SECONDS if session.get("remember") else ADMIN_IDLE_SECONDS
+    if now - session.get("last_active", now) > limit:
+        session.clear()
+        return False
+    row = query_one("SELECT password_hash FROM admin WHERE id=?", (session["admin_id"],))
+    if not row:
+        session.clear()
+        return False
+    fp = _session_fingerprint(row["password_hash"])
+    if session.get("pwfp") is None:          # 这个版本之前登录的会话：补上指纹
+        session["pwfp"] = fp
+    elif session["pwfp"] != fp:              # 管理员密码改过了
+        session.clear()
+        return False
+    return True
+
+def safe_next(default_endpoint="dashboard"):
+    """登录后跳回的地址只允许本站路径，防止被拿来跳到别的网站。"""
+    n = request.args.get("next") or ""
+    if n.startswith("/") and not n.startswith("//") and "\\" not in n:
+        return n
+    return url_for(default_endpoint)
+
 def login_required(f):
     @wraps(f)
     def wrapper(*a, **kw):
         now = int(time.time())
-        logged_in = bool(session.get("admin_id"))
-        if logged_in and now - session.get("last_active", now) > ADMIN_IDLE_SECONDS:
-            session.clear()
-            logged_in = False
+        logged_in = admin_session_valid()
         if not logged_in:
             if (request.is_json or request.endpoint == "admin_codes"
                     or request.path.startswith("/admin/hezu/api/")):
@@ -344,6 +376,10 @@ def admin_root():
 @limiter.limit("5 per minute; 20 per hour", methods=["POST"])
 def login():
     error = None
+    if request.method == "GET" and admin_session_valid():
+        # 已经登录（比如记住了这台设备）：书签直接指向登录页时也直接进去
+        session["last_active"] = int(time.time())
+        return redirect(safe_next())
     if request.method == "POST":
         u = request.form.get("username", "").strip()
         p = request.form.get("password", "")
@@ -352,15 +388,19 @@ def login():
         try:
             PH.verify(row["password_hash"] if row else dummy, p)
             if row:
-                if PH.check_needs_rehash(row["password_hash"]):
-                    execute("UPDATE admin SET password_hash=? WHERE id=?",
-                            (PH.hash(p), row["id"]))
+                pw_hash = row["password_hash"]
+                if PH.check_needs_rehash(pw_hash):
+                    pw_hash = PH.hash(p)
+                    execute("UPDATE admin SET password_hash=? WHERE id=?", (pw_hash, row["id"]))
+                remember = request.form.get("remember") == "on"
                 session.clear()
-                session.permanent = True
+                session.permanent = remember
+                session["remember"] = remember
                 session["admin_id"] = row["id"]
                 session["admin_user"] = row["username"]
                 session["last_active"] = int(time.time())
-                return redirect(request.args.get("next") or url_for("dashboard"))
+                session["pwfp"] = _session_fingerprint(pw_hash)
+                return redirect(safe_next())
         except (VerifyMismatchError, VerificationError, InvalidHashError):
             pass
         error = "用户名或密码错误"
@@ -858,9 +898,11 @@ def settings():
                 row = query_one("SELECT password_hash FROM admin WHERE id=?", (session["admin_id"],))
                 try:
                     PH.verify(row["password_hash"], old)
+                    new_hash = PH.hash(new)
                     execute("UPDATE admin SET password_hash=? WHERE id=?",
-                            (PH.hash(new), session["admin_id"]))
-                    msg = "管理员密码已修改"
+                            (new_hash, session["admin_id"]))
+                    session["pwfp"] = _session_fingerprint(new_hash)   # 本机保持登录，其他设备全部退出
+                    msg = "管理员密码已修改，其他设备上的登录已全部退出"
                 except (VerifyMismatchError, VerificationError):
                     error = "原密码错误"
         elif action == "change_admin_username":

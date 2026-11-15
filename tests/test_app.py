@@ -495,3 +495,65 @@ def test_dashboard_password_column_never_contains_the_password(ctx):
     assert "js-copy-name" in html
     r = post(c, f"/admin/accounts/{aid}/password/reveal")
     assert r.get_json()["password"] == "Secret-PW-123"
+
+
+# ---------- 记住这台设备 ----------
+from conftest import ADMIN_PASSWORD, ADMIN_USER  # noqa: E402
+
+
+def login(c, remember, next_path=None):
+    url = "/admin/login" + (f"?next={next_path}" if next_path else "")
+    data = {"username": ADMIN_USER, "password": ADMIN_PASSWORD}
+    if remember:
+        data["remember"] = "on"
+    return post(c, url, data=data)
+
+
+def set_idle(c, seconds):
+    with c.session_transaction(base_url=BASE_URL) as s:
+        s["last_active"] = int(time.time()) - seconds
+
+
+def test_remember_me_keeps_you_logged_in(ctx):
+    c = ctx.client()
+    r = login(c, remember=True)
+    assert r.status_code == 302
+    cookie = r.headers["Set-Cookie"]
+    assert "Expires=" in cookie and "HttpOnly" in cookie and "Secure" in cookie
+    set_idle(c, 3 * 86400)                       # 三天没用，照样直接进
+    assert get(c, "/admin/dashboard").status_code == 200
+    set_idle(c, 31 * 86400)                      # 超过 30 天才要重新登录
+    assert get(c, "/admin/dashboard").status_code == 302
+
+
+def test_without_remember_idle_logout_still_applies(ctx):
+    c = ctx.client()
+    r = login(c, remember=False)
+    assert "Expires=" not in r.headers["Set-Cookie"]   # 关浏览器就失效
+    set_idle(c, 31 * 60)
+    assert get(c, "/admin/dashboard").status_code == 302
+
+
+def test_login_page_skips_when_already_logged_in(ctx):
+    c = ctx.client()
+    login(c, remember=True)
+    r = get(c, "/admin/login")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/admin/dashboard")
+    r = get(c, "/admin/login?next=/admin/hezu")
+    assert r.headers["Location"].endswith("/admin/hezu")
+    for evil in ("https://evil.example/", "//evil.example/", "/\\evil.example"):
+        r = get(c, "/admin/login?next=" + evil)
+        assert r.headers["Location"].endswith("/admin/dashboard"), evil
+    r = login(ctx.client(), remember=False, next_path="https://evil.example/")
+    assert r.headers["Location"].endswith("/admin/dashboard")
+
+
+def test_changing_admin_password_logs_out_other_devices(ctx):
+    phone, laptop = ctx.client(), ctx.client()
+    login(phone, remember=True)
+    login(laptop, remember=True)
+    r = post(laptop, "/admin/settings", data={"action": "change_admin_password",
+                                             "old_password": ADMIN_PASSWORD, "new_password": "a-brand-new-password-42"})
+    assert "其他设备上的登录已全部退出" in r.get_data(as_text=True)
+    assert get(laptop, "/admin/dashboard").status_code == 200      # 改密码的这台保持登录
+    assert get(phone, "/admin/dashboard").status_code == 302       # 其他设备要重新登录
