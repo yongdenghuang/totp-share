@@ -25,8 +25,8 @@ struct RootView: View {
     var body: some View {
         ZStack {
             Color("LaunchBackground").ignoresSafeArea()
-            if let url = settings.homeURL {
-                WebScreen(home: url)
+            if let base = settings.serverBase {
+                MainShell(base: base).id(base)
             } else {
                 SetupView()
             }

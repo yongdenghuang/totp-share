@@ -355,7 +355,7 @@ def login_required(f):
         logged_in = admin_session_valid()
         if not logged_in:
             if (request.is_json or request.endpoint == "admin_codes"
-                    or request.path.startswith(("/admin/hezu/api/", "/admin/vault/api/"))):
+                    or request.path.startswith(("/admin/hezu/api/", "/admin/vault/api/", "/api/app/"))):
                 return jsonify(ok=False, error="登录已过期，请刷新页面重新登录"), 401
             return redirect(url_for("login", next=request.path))
         if request.endpoint != "admin_codes":
@@ -381,30 +381,35 @@ def login():
         session["last_active"] = int(time.time())
         return redirect(safe_next())
     if request.method == "POST":
-        u = request.form.get("username", "").strip()
-        p = request.form.get("password", "")
-        row = query_one("SELECT id, username, password_hash FROM admin WHERE username=?", (u,))
-        dummy = "$argon2id$v=19$m=65536,t=3,p=4$aaaaaaaaaaaaaaaa$" + "a"*43
-        try:
-            PH.verify(row["password_hash"] if row else dummy, p)
-            if row:
-                pw_hash = row["password_hash"]
-                if PH.check_needs_rehash(pw_hash):
-                    pw_hash = PH.hash(p)
-                    execute("UPDATE admin SET password_hash=? WHERE id=?", (pw_hash, row["id"]))
-                remember = request.form.get("remember") == "on"
-                session.clear()
-                session.permanent = remember
-                session["remember"] = remember
-                session["admin_id"] = row["id"]
-                session["admin_user"] = row["username"]
-                session["last_active"] = int(time.time())
-                session["pwfp"] = _session_fingerprint(pw_hash)
-                return redirect(safe_next())
-        except (VerifyMismatchError, VerificationError, InvalidHashError):
-            pass
+        if admin_sign_in(request.form.get("username", ""), request.form.get("password", ""),
+                         request.form.get("remember") == "on"):
+            return redirect(safe_next())
         error = "用户名或密码错误"
     return render_template("login.html", error=error)
+
+def admin_sign_in(username, password, remember):
+    """校验管理员账号密码，通过就建立登录会话。网页登录和 App 登录共用。"""
+    u = (username or "").strip()
+    row = query_one("SELECT id, username, password_hash FROM admin WHERE username=?", (u,))
+    dummy = "$argon2id$v=19$m=65536,t=3,p=4$aaaaaaaaaaaaaaaa$" + "a"*43
+    try:
+        PH.verify(row["password_hash"] if row else dummy, password or "")
+    except (VerifyMismatchError, VerificationError, InvalidHashError):
+        return False
+    if not row:
+        return False
+    pw_hash = row["password_hash"]
+    if PH.check_needs_rehash(pw_hash):
+        pw_hash = PH.hash(password)
+        execute("UPDATE admin SET password_hash=? WHERE id=?", (pw_hash, row["id"]))
+    session.clear()
+    session.permanent = bool(remember)
+    session["remember"] = bool(remember)
+    session["admin_id"] = row["id"]
+    session["admin_user"] = row["username"]
+    session["last_active"] = int(time.time())
+    session["pwfp"] = _session_fingerprint(pw_hash)
+    return True
 
 @app.route("/admin/logout", methods=["POST"])
 @login_required
@@ -1024,6 +1029,8 @@ import hezu     # noqa: E402
 hezu.install(sys.modules[__name__])
 import vault    # noqa: E402
 vault.install(sys.modules[__name__])
+import appapi   # noqa: E402
+appapi.install(sys.modules[__name__])
 
 if __name__ == "__main__":
     app.run(host=os.environ.get("BIND_ADDR", "127.0.0.1"),

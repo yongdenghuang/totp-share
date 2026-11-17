@@ -71,4 +71,6 @@ if __name__ == "__main__":
     seed()
     from app import app
     app.config["TEMPLATES_AUTO_RELOAD"] = True   # 改模板后刷新页面即可看到
+    # 本地预览只走 http://127.0.0.1：登录 cookie 不能标「仅 https」，否则 iOS 模拟器里的 App 存不下来
+    app.config["SESSION_COOKIE_SECURE"] = False
     app.run(host="127.0.0.1", port=8767, debug=False)

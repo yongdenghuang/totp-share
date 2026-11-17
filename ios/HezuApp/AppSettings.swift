@@ -8,6 +8,12 @@ final class AppSettings: ObservableObject {
     static let lockAfterKey = "lock_after"
 
     @Published private(set) var homeURL: URL?
+    /// 服务器根地址（https://example.com），App 的接口都相对它
+    var serverBase: URL? {
+        guard let h = homeURL, var p = URLComponents(url: h, resolvingAgainstBaseURL: false) else { return nil }
+        p.path = "/"
+        return p.url
+    }
     @Published private(set) var lockEnabled = true
     @Published private(set) var lockAfterSeconds: Double = 60
 

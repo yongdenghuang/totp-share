@@ -2,50 +2,23 @@ import SafariServices
 import SwiftUI
 import WebKit
 
-/// 打开后台网页的那一层。网页只建一次，切到后台、上锁再解锁都不会重新加载，正在写的备忘录不会丢。
-struct WebScreen: View {
-    let home: URL
+/// App 里还没做成原生的页面（合租账本的表格、支付卡、VPS、设置……）：嵌一个网页进来。
+/// 用 App 已登录的会话（把 cookie 交给网页），并隐藏网页自己的左侧导航——导航由 App 负责。
+struct EmbeddedWeb: View {
+    let path: String
+    @EnvironmentObject var api: API
     @StateObject private var web = WebController()
 
     var body: some View {
         ZStack {
             WebViewHost(controller: web)
-                .ignoresSafeArea(.container, edges: .bottom)
             if let err = web.loadError {
-                ErrorOverlay(message: err) { web.reload(home: home) }
+                ErrorBanner(message: err) { web.reload(home: api.url(path)) }.background(Color(.systemBackground))
             } else if !web.ready {
-                // 第一次打开、网页还没画出来时：显示标志和转圈，而不是一片空白
-                ZStack {
-                    Color("LaunchBackground").ignoresSafeArea()
-                    VStack(spacing: 22) {
-                        AppMark(size: 72)
-                        ProgressView().tint(.white)
-                    }
-                }
-                .transition(.opacity)
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(.systemGroupedBackground))
             }
         }
-        .onAppear { web.open(home) }
-        .onChange(of: home) { web.open($0) }
-    }
-}
-
-struct ErrorOverlay: View {
-    let message: String
-    let retry: () -> Void
-    var body: some View {
-        ZStack {
-            Color("LaunchBackground").ignoresSafeArea()
-            VStack(spacing: 14) {
-                Image(systemName: "wifi.exclamationmark").font(.system(size: 40)).foregroundColor(.white.opacity(0.7))
-                Text("打不开后台").font(.headline).foregroundColor(.white)
-                Text(message).font(.footnote).foregroundColor(.white.opacity(0.6))
-                    .multilineTextAlignment(.center).padding(.horizontal, 32)
-                Button("重试", action: retry).buttonStyle(.borderedProminent).padding(.top, 6)
-                Text("服务器地址可以在系统「设置」→「合租管理」里修改")
-                    .font(.caption).foregroundColor(.white.opacity(0.4)).padding(.top, 18)
-            }
-        }
+        .task { web.open(api.url(path)) }
     }
 }
 
@@ -75,6 +48,10 @@ final class WebController: NSObject, ObservableObject {
               var m = document.querySelector('meta[name=viewport]');
               if (!m) { m = document.createElement('meta'); m.name = 'viewport'; document.head.appendChild(m); }
               m.content = 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover';
+              // 导航由 App 负责：隐藏网页自己的左侧（手机上是顶部）导航
+              var st = document.createElement('style');
+              st.textContent = '.side{display:none!important}.shell{display:block!important}';
+              document.head.appendChild(st);
             })();
             """, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         webView = WKWebView(frame: .zero, configuration: config)
@@ -83,46 +60,28 @@ final class WebController: NSObject, ObservableObject {
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.isOpaque = false
-        webView.backgroundColor = UIColor(named: "LaunchBackground")
-        webView.scrollView.backgroundColor = UIColor(named: "LaunchBackground")
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.backgroundColor = .systemGroupedBackground
+        webView.scrollView.backgroundColor = .systemGroupedBackground
+        webView.scrollView.contentInsetAdjustmentBehavior = .automatic
         #if DEBUG
         if #available(iOS 16.4, *) { webView.isInspectable = true }   // Mac 上的 Safari 可以调试
         #endif
         let refresh = UIRefreshControl()
-        refresh.tintColor = .white
+        refresh.tintColor = .gray
         refresh.addTarget(self, action: #selector(pulled(_:)), for: .valueChanged)
         webView.scrollView.refreshControl = refresh
-        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.rememberCookies() }
-        }
     }
 
     func open(_ url: URL) {
         if home?.host == url.host && home?.port == url.port && webView.url != nil { return }
         home = url
         loadError = nil
-        guard let host = url.host else { webView.load(URLRequest(url: url)); return }
-        // 先把钥匙串里存的登录状态放回网页里，再打开，这样「记住这台设备」不会因为 App 被划掉而丢
-        var cookies = CookieVault.load(for: host)
-        #if DEBUG
-        // 只在调试版里：模拟器自动化测试时用环境变量 HEZU_DEBUG_COOKIE=名称=值 直接带上登录状态
-        if let raw = ProcessInfo.processInfo.environment["HEZU_DEBUG_COOKIE"], let eq = raw.firstIndex(of: "="),
-           let c = HTTPCookie(properties: [.name: String(raw[..<eq]), .value: String(raw[raw.index(after: eq)...]),
-                                           .domain: host, .path: "/", .expires: Date().addingTimeInterval(30 * 86400)]) {
-            cookies.append(c)
-        }
-        #endif
+        // App 原生部分登录用的 cookie（HTTPCookieStorage）交给网页，网页就不用再登录一次
+        let cookies = HTTPCookieStorage.shared.cookies(for: url) ?? []
         let store = webView.configuration.websiteDataStore.httpCookieStore
         let group = DispatchGroup()
         for c in cookies { group.enter(); store.setCookie(c) { group.leave() } }
         group.notify(queue: .main) { [weak self] in self?.webView.load(URLRequest(url: url)) }
-    }
-
-    /// 把当前的登录状态存进钥匙串（页面加载完、App 切到后台时）
-    func rememberCookies() {
-        guard let host = home?.host else { return }
-        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { CookieVault.save($0, for: host) }
     }
 
     func reload(home url: URL) {
@@ -192,7 +151,6 @@ extension WebController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if !ready { withAnimation(.easeOut(duration: 0.2)) { ready = true } }
         loadError = nil
-        rememberCookies()
         webView.scrollView.refreshControl?.endRefreshing()
     }
 
