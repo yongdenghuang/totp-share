@@ -26,6 +26,8 @@ struct LedgerSheetView: View {
     @State private var editing: RowRef?
     @State private var confirmArchive = false
     @State private var deleting: JSON?
+    @State private var sheetSettings = false
+    @Environment(\.dismiss) private var dismissView
 
     private var sheet: JSON { ledger.sheet(sheetID) ?? [:] }
     private var mode: String { sheet.str("mode") }
@@ -99,12 +101,15 @@ struct LedgerSheetView: View {
                     if mode == "members" && editable {
                         Button { markAllPaid() } label: { Label("本页全部标记已收", systemImage: "checkmark.circle") }
                     }
+                    Divider()
+                    Button { sheetSettings = true } label: { Label("表设置（改名、收费方式）", systemImage: "slider.horizontal.3") }
                 } label: { Image(systemName: "ellipsis.circle") }
             }
         }
         .sheet(item: $editing) { ref in
             RowEditor(sheetID: sheetID, ym: month, rowID: ref.id, presetGroup: ref.preset, editable: editable)
         }
+        .sheet(isPresented: $sheetSettings) { SheetForm(sheetID: sheetID, onDeleted: { dismissView() }) }
         .alert("归档并开始 \(ymLabel(nextYM(month)))？", isPresented: $confirmArchive) {
             Button("取消", role: .cancel) {}
             Button("归档并开始") { ledger.edit { $0.startNextMonth() }; ym = ""; toast.show("已开始 \(ymLabel(nextYM(month)))") }

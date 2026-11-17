@@ -1882,8 +1882,8 @@
     }
     out.push({ name: '按卡统计', head: MH.concat(['卡信息', '国家 / 地区', '卡号', '账号数', '续费成本']), rows: spend });
     const cardRows = [];
-    for (const it of S.issuers) { const own = cardsOf(it.id); if (!own.length) cardRows.push([it.name, it.country || '', '', '']); own.forEach(c => cardRows.push([it.name, it.country || '', c.number || '', c.note || ''])); }
-    out.push({ name: '支付卡', head: ['卡信息', '国家 / 地区', '卡号', '备注'], rows: cardRows });
+    for (const it of S.issuers) { const own = cardsOf(it.id); if (!own.length) cardRows.push([it.name, it.country || '', '', '', '', '']); own.forEach(c => cardRows.push([it.name, it.country || '', c.number || '', c.expiry || '', c.cvc || '', c.note || ''])); }
+    out.push({ name: '支付卡', head: ['卡信息', '国家 / 地区', '卡号', '有效期', 'CVC', '备注'], rows: cardRows });
     out.push({ name: 'VPS', head: ['主机', '官网', 'IP', '端口', '密码', '部署', '流量及重置', '续费', '价格', '邮箱', '登录密码'], rows: S.vps.map(v => [v.host, v.site, v.ip, v.port, v.password, tagNames(v).join('，'), v.traffic, D(v.renew), v.price, v.email, v.loginPassword]) });
     return out;
   }
@@ -1899,7 +1899,7 @@
     const fm = h('label', { class: 'field' }, '月份', month), fy = h('label', { class: 'field', hidden: true }, '年份', year);
     mode.addEventListener('change', () => { fm.hidden = mode.value !== 'month'; fy.hidden = mode.value !== 'year'; });
     const ok = await dialog('导出 Excel', [h('label', { class: 'field' }, '范围', mode), fm, fy,
-      h('div', { class: 'muted', text: '按年导出会多一张“年度汇总”，其余各表把全年每个月的数据排在一起。\n文件里的卡号和 VPS 密码是完整的，注意保管。' })],
+      h('div', { class: 'muted', text: '按年导出会多一张“年度汇总”，其余各表把全年每个月的数据排在一起。\n文件里的卡号、有效期、CVC 和 VPS 密码是完整的，注意保管。' })],
       [{ text: '取消' }, { text: '导出', cls: 'primary', value: true }]);
     if (!ok) return;
     const yearly = mode.value === 'year', months = yearly ? keys.filter(k => k.slice(0, 4) === year.value) : [month.value];

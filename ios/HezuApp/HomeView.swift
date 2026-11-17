@@ -178,12 +178,13 @@ struct MoreView: View {
                 }
                 NavigationLink { LedgerDestination(route: .cards) } label: { Label("支付卡", systemImage: "creditcard") }
                 NavigationLink { LedgerDestination(route: .vps) } label: { Label("VPS", systemImage: "server.rack") }
-                webLink("表设置、导入导出、历史版本（网页）", "tablecells", "/admin/hezu#home")
+                NavigationLink { SheetsManager() } label: { Label("表设置（新建、改名、排序）", systemImage: "tablecells") }
+                NavigationLink { LedgerDataView() } label: { Label("导入导出、备份、历史版本", systemImage: "arrow.up.arrow.down.square") }
             }
             Section("后台") {
-                webLink("访问记录", "list.bullet.rectangle", "/admin/logs")
-                webLink("分组管理", "folder", "/admin/groups")
-                webLink("设置", "gearshape", "/admin/settings")
+                NavigationLink { LogsView() } label: { Label("访问记录", systemImage: "list.bullet.rectangle") }
+                NavigationLink { GroupsManager() } label: { Label("分组管理", systemImage: "folder") }
+                NavigationLink { SettingsView() } label: { Label("设置", systemImage: "gearshape") }
             }
             Section {
                 Button { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } } label: {

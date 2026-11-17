@@ -19,6 +19,7 @@ import pyotp
 from flask import jsonify, render_template, request, url_for
 from flask_wtf.csrf import generate_csrf
 
+import hezu_export
 import hezu_xlsx
 
 API_PREFIX = "/admin/hezu/api/"
@@ -318,6 +319,27 @@ def install(core):
         if rev is None:
             return jsonify(ok=False, error="数据已在别处被修改"), 409
         return jsonify(ok=True, rev=rev, csrf=generate_csrf())
+
+    @app.route(API_PREFIX + "export")
+    @api_limit
+    @login_required
+    def hezu_export_xlsx():
+        """导出 Excel（App 用；网页在浏览器里自己生成同样的文件）。?month=2026-11 或 ?year=2026"""
+        state = load_state()[1]
+        keys = sorted(k for k, v in (state.get("months") or {}).items() if isinstance(v, dict))
+        year, month = request.args.get("year", ""), request.args.get("month", "")
+        if year:
+            months, name = [k for k in keys if k.startswith(year + "-")], f"合租管理-{year}年.xlsx"
+        else:
+            month = month or (keys[-1] if keys else "")
+            months, name = [k for k in keys if k == month], f"合租管理-{hezu_export.ym_label(month).replace(' ', '')}.xlsx" if month else "合租管理.xlsx"
+        if not months:
+            return jsonify(ok=False, error="这个时间段没有数据"), 404
+        data = hezu_export.build(state, context()["groups"], months, bool(year))
+        from urllib.parse import quote
+        return app.response_class(data, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                  headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}",
+                                           "Cache-Control": "no-store"})
 
     @app.route(API_PREFIX + "rates")
     @api_limit
