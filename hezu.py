@@ -118,25 +118,84 @@ def context():
                 for r in _core.query_all(
                     """SELECT id, name, group_name, password_encrypted IS NOT NULL AS has_password
                        FROM accounts ORDER BY COALESCE(sort_order, 999999), created_at DESC""")]
-    import vault   # 左侧导航上密码本、备忘录的数量（账本页的导航由 app.js 画）
-    return {"groups": groups, "accounts": accounts, "vault": vault.counts()}
+    import vault   # 左侧导航上密码本、备忘录的数量和各项的顺序（账本页的导航由 app.js 画）
+    return {"groups": groups, "accounts": accounts, "vault": vault.counts(), "navOrder": nav_order()}
+
+
+# 左侧导航：四个大分类，每个分类里的小项都能拖动调整顺序。顺序存在 settings 表（nav_order），
+# 「账号」分类里的表的顺序就是账本里 sheets 的顺序，存在账本里。验证码各页、账本页、密码本页共用。
+NAV_SECTIONS = [("accounts", "账号"), ("backend", "后台"), ("backup", "备份"), ("totp", "验证码")]
+NAV_ITEMS = {"backend": ["cards", "vps"], "backup": ["vault", "notes"], "totp": ["dashboard", "logs", "settings"]}
+
+
+def _ordered(saved, known):
+    """按保存的顺序排，没保存过的（新加的）按默认顺序接在后面；不认识的丢掉。"""
+    saved = [x for x in saved if x in known] if isinstance(saved, list) else []
+    out = []
+    for x in saved + list(known):
+        if x not in out:
+            out.append(x)
+    return out
+
+
+def nav_order():
+    try:
+        raw = json.loads(_core.get_setting("nav_order", "") or "{}")
+    except ValueError:
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    items = raw.get("items") if isinstance(raw.get("items"), dict) else {}
+    return {"sections": _ordered(raw.get("sections"), [k for k, _ in NAV_SECTIONS]),
+            "items": {k: _ordered(items.get(k), v) for k, v in NAV_ITEMS.items()}}
+
+
+def save_nav_order(data):
+    if not isinstance(data, dict):
+        raise ValueError("参数错误")
+    cur = nav_order()
+    if "sections" in data:
+        cur["sections"] = _ordered(data["sections"], [k for k, _ in NAV_SECTIONS])
+    for k, v in (data.get("items") or {}).items() if isinstance(data.get("items"), dict) else []:
+        if k in NAV_ITEMS:
+            cur["items"][k] = _ordered(v, NAV_ITEMS[k])
+    _core.set_setting("nav_order", json.dumps(cur, separators=(",", ":")))
+    return cur
 
 
 def shell_nav():
-    """验证码各页的左侧导航和账本页是同一套，这里给模板提供账本那几项的名字和数量。"""
+    """验证码各页、密码本、备忘录的左侧导航（服务器画）。账本页的导航由 app.js 按同样的顺序画。"""
     try:
         state = load_state()[1]
     except Exception:          # 账本读不出来也不能让验证码页面打不开
         state = default_state()
     months = sorted(k for k, v in state.get("months", {}).items() if isinstance(v, dict))
     rows = (state["months"][months[-1]].get("rows") or {}) if months else {}
-    sheets = [{"id": str(s["id"]), "name": str(s.get("name") or ""), "grouped": bool(s.get("grouped")),
-               "resale": s.get("mode") == "resale",
+    ledger = url_for("hezu_page")
+    import vault
+    vc = vault.counts()
+    accounts = _core.query_one("SELECT COUNT(*) AS n FROM accounts")["n"]
+    sheets = [{"id": str(s["id"]), "sheet": True, "text": str(s.get("name") or ""), "href": ledger + "#" + str(s["id"]),
+               "icon": "users" if s.get("grouped") else "bolt" if s.get("mode") == "resale" else "play",
                "count": len(rows.get(s["id"]) or [])}
               for s in state.get("sheets", []) if isinstance(s, dict) and s.get("id")]
-    accounts = _core.query_one("SELECT COUNT(*) AS n FROM accounts")["n"]
-    return {"sheets": sheets, "cards": len(state.get("cards") or []),
-            "vps": len(state.get("vps") or []), "accounts": accounts}
+    items = {
+        "cards": {"text": "支付卡", "href": ledger + "#cards", "icon": "card", "count": len(state.get("cards") or [])},
+        "vps": {"text": "VPS", "href": ledger + "#vps", "icon": "server", "count": len(state.get("vps") or [])},
+        "vault": {"text": "密码本", "href": url_for("vault_page"), "icon": "lock", "count": vc["items"], "on": ["vault_page"]},
+        "notes": {"text": "备忘录", "href": url_for("notes_page"), "icon": "note", "count": vc["notes"], "on": ["notes_page"]},
+        "dashboard": {"text": "验证码账号", "href": url_for("dashboard"), "icon": "key", "count": accounts,
+                      "on": ["dashboard", "account_new", "account_edit", "groups_page"]},
+        "logs": {"text": "访问记录", "href": url_for("access_logs"), "icon": "list", "on": ["access_logs"]},
+        "settings": {"text": "设置", "href": url_for("settings"), "icon": "gear", "on": ["settings"]},
+    }
+    order = nav_order()
+    labels = dict(NAV_SECTIONS)
+    sections = []
+    for sec in order["sections"]:
+        its = sheets if sec == "accounts" else [dict(items[i], id=i) for i in order["items"][sec]]
+        sections.append({"id": sec, "label": labels[sec], "items": its, "newSheet": sec == "accounts"})
+    return {"sections": sections}
 
 
 def static_url(filename):
@@ -275,6 +334,32 @@ def install(core):
     @login_required
     def hezu_context():
         return jsonify(ok=True, csrf=generate_csrf(), **context())
+
+    @app.route(API_PREFIX + "nav-order", methods=["POST"])
+    @api_limit
+    @login_required
+    def hezu_nav_order():
+        """拖动左侧导航的大分类或「后台」「备份」「验证码」里的小项。"""
+        try:
+            return jsonify(ok=True, navOrder=save_nav_order(read_json()))
+        except ValueError as e:
+            return jsonify(ok=False, error=str(e)), 400
+
+    @app.route(API_PREFIX + "sheet-order", methods=["POST"])
+    @api_limit
+    @login_required
+    def hezu_sheet_order():
+        """在验证码各页、密码本页拖动「账号」里的表：直接改账本里表的顺序（账本页自己改 sheets 再保存）。"""
+        order = (read_json() or {}).get("order")
+        if not isinstance(order, list) or not all(isinstance(x, str) for x in order):
+            return jsonify(ok=False, error="参数错误"), 400
+        for _ in range(5):            # 恰好有别处在保存时重试
+            rev, state = load_state()
+            pos = {sid: i for i, sid in enumerate(order)}
+            state["sheets"].sort(key=lambda s: pos.get(str(s.get("id")), len(pos)))
+            if save_state(state, rev) is not None:
+                return jsonify(ok=True)
+        return jsonify(ok=False, error="账本正忙，请稍后再试"), 409
 
     @app.route(API_PREFIX + "groups", methods=["POST"])
     @api_limit

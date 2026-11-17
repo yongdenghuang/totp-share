@@ -31,6 +31,7 @@
   let G = [];                         // 分组：和验证码账号共用一套，以验证码后台为准
   let A = [];                         // 验证码账号名单（不含密钥和密码）
   let VC = { items: 0, notes: 0 };    // 密码本、备忘录的条数（导航上显示）
+  let NAV = { sections: ['accounts', 'backend', 'backup', 'totp'], items: {} };   // 左侧导航的顺序（服务器上存着）
   let CSRF = document.getElementById('app').dataset.csrf || '';
   const API = '/admin/hezu/api';
   const codes = { map: {}, until: 0, period: 30, timer: null, els: [], timers: [] };   // 当前验证码，只显示不保存
@@ -360,7 +361,7 @@
     }
     return r;
   }
-  function useContext(d) { if (d.csrf) CSRF = d.csrf; if (d.groups) G = d.groups; if (d.accounts) A = d.accounts; if (d.vault) VC = d.vault; }
+  function useContext(d) { if (d.csrf) CSRF = d.csrf; if (d.groups) G = d.groups; if (d.accounts) A = d.accounts; if (d.vault) VC = d.vault; if (d.navOrder) NAV = d.navOrder; }
   async function refreshContext() {
     try {
       const r = await fetch(API + '/context', { credentials: 'same-origin' });
@@ -1900,30 +1901,38 @@
 
   // ---------- 页面 ----------
   // 左侧的表可以拖动调整顺序（顺序存在账本里，验证码页面的导航也跟着变）
-  let dragSheet = null;
-  function dragSheetNav(el, sh) {
-    el.draggable = true;
-    el.title = '拖动可以调整顺序';
-    const clear = () => document.querySelectorAll('.side .drop-before, .side .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
-    const after = e => { const r = el.getBoundingClientRect(); return window.innerWidth <= 880 ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2; };
-    el.addEventListener('dragstart', e => { dragSheet = sh.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', sh.id); });
-    el.addEventListener('dragend', () => { dragSheet = null; el.classList.remove('dragging'); clear(); });
-    el.addEventListener('dragover', e => {
-      if (!dragSheet || dragSheet === sh.id) return;
-      e.preventDefault();
-      const a = after(e); el.classList.toggle('drop-after', a); el.classList.toggle('drop-before', !a);
+  // 左侧导航的拖动排序在 navdrag.js（各页共用）；这里接住「账号」里表的新顺序，改账本再保存
+  document.addEventListener('hz-sheet-order', e => {
+    e.preventDefault();
+    const pos = new Map(e.detail.map((id, i) => [id, i]));
+    S.sheets.sort((a, b) => (pos.has(a.id) ? pos.get(a.id) : 1e9) - (pos.has(b.id) ? pos.get(b.id) : 1e9));
+    touch(); render();
+  });
+  document.addEventListener('hz-nav-order', e => { NAV = e.detail; });
+  // 左侧导航的四个大分类，按 NAV 里存的顺序画；和服务器画的 templates/_shell.html 保持一致
+  function navSections(nav, link, M) {
+    const drag = el => { el.draggable = true; el.title = '拖动可以调整顺序'; return el; };
+    const items = {
+      cards: () => nav('cards', '支付卡', 'card', S.cards.length), vps: () => nav('vps', 'VPS', 'server', S.vps.length),
+      vault: () => link('/admin/vault', '密码本', 'lock', VC.items), notes: () => link('/admin/notes', '备忘录', 'note', VC.notes),
+      dashboard: () => link('/admin/dashboard', '验证码账号', 'key', A.length), logs: () => link('/admin/logs', '访问记录', 'list'), settings: () => link('/admin/settings', '设置', 'gear'),
+    };
+    const defaults = { backend: ['cards', 'vps'], backup: ['vault', 'notes'], totp: ['dashboard', 'logs', 'settings'] };
+    const labels = { accounts: '账号', backend: '后台', backup: '备份', totp: '验证码' };
+    const secs = (NAV.sections || []).filter(k => labels[k]);
+    Object.keys(labels).forEach(k => { if (!secs.includes(k)) secs.push(k); });
+    return secs.map(k => {
+      let kids;
+      if (k === 'accounts') {
+        kids = [S.sheets.map(s => { const el = drag(nav(s.id, s.name, s.grouped ? 'users' : s.mode === 'resale' ? 'bolt' : 'play', M.rows[s.id].length)); el.dataset.item = s.id; el.dataset.sheet = '1'; return el; }),
+          h('button', { class: 'nav', type: 'button', title: '新建一张表', onclick: () => sheetForm(null) }, icon('plus'), h('span', { text: '新建表' }))];
+      } else {
+        const order = ((NAV.items || {})[k] || []).filter(x => defaults[k].includes(x));
+        defaults[k].forEach(x => { if (!order.includes(x)) order.push(x); });
+        kids = order.map(id => { const el = drag(items[id]()); el.dataset.item = id; return el; });
+      }
+      return h('div', { class: 'nav-sec', 'data-sec': k }, h('div', { class: 'nav-label', draggable: 'true', title: '拖动可以调整分类顺序', text: labels[k] }), kids);
     });
-    el.addEventListener('dragleave', () => el.classList.remove('drop-before', 'drop-after'));
-    el.addEventListener('drop', e => {
-      e.preventDefault();
-      const a = el.classList.contains('drop-after'), from = dragSheet;
-      clear();
-      if (!from || from === sh.id) return;
-      const moved = S.sheets.find(x => x.id === from), list = S.sheets.filter(x => x.id !== from);
-      list.splice(list.findIndex(x => x.id === sh.id) + (a ? 1 : 0), 0, moved);
-      S.sheets = list; touch(); render();
-    });
-    return el;
   }
   function render() {
     closePop(); updaters = []; searchRows = []; codes.els = []; codes.timers = [];
@@ -1941,15 +1950,7 @@
     const side = h('nav', { class: 'side', 'aria-label': '主导航' },
       h('div', { class: 'brand' }, h('div', { class: 'logo', text: '租' }), h('span', { text: '合租管理' })),
       nav('home', '总览', 'grid'),
-      h('div', { class: 'nav-label', text: '账号' }),
-      S.sheets.map(s => dragSheetNav(nav(s.id, s.name, s.grouped ? 'users' : s.mode === 'resale' ? 'bolt' : 'play', M.rows[s.id].length), s)),
-      h('button', { class: 'nav', type: 'button', title: '新建一张表', onclick: () => sheetForm(null) }, icon('plus'), h('span', { text: '新建表' })),
-      h('div', { class: 'nav-label', text: '后台' }),
-      nav('cards', '支付卡', 'card', S.cards.length), nav('vps', 'VPS', 'server', S.vps.length),
-      h('div', { class: 'nav-label', text: '备份' }),
-      link('/admin/vault', '密码本', 'lock', VC.items), link('/admin/notes', '备忘录', 'note', VC.notes),
-      h('div', { class: 'nav-label', text: '验证码' }),
-      link('/admin/dashboard', '验证码账号', 'key', A.length), link('/admin/logs', '访问记录', 'list'), link('/admin/settings', '设置', 'gear'),
+      navSections(nav, link, M),
       h('div', { class: 'side-foot' }, statusEl,
         h('button', { class: 'nav', type: 'button', 'data-fx-toggle': '1', title: '汇率计算器' }, icon('fx'), h('span', { text: '汇率计算器' })),
         h('button', { class: 'nav', type: 'button', onclick: e => menu(e.currentTarget, [

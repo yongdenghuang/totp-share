@@ -223,6 +223,9 @@ def install(core):
             return jsonify(ok=False, conflict=True, error="这一条刚在别处被修改过",
                            entry=entry_json(row, old, kind)), 409
         incoming = d.get("data") or {}
+        if d.get("patch") and isinstance(incoming, dict):
+            # 表格里直接改某一格：只改带来的字段，其他（包括密码、附加信息）原样保留
+            incoming = dict(old, **{k: v for k, v in incoming.items() if k != "extras"})
         if kind == "item" and isinstance(incoming, dict):
             # 页面没取过密码 / 保密信息时不会带回来：没带的就沿用原来的
             if "password" not in incoming:

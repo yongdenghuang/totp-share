@@ -21,6 +21,14 @@ table.vtable td .cf-val { max-width: 100%; display: inline-block; vertical-align
 .pwcell .cf-val { flex: 0 1 auto; }
 .vbtn { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text3); display: inline-flex; align-items: center; justify-content: center; }
 .vbtn:hover, .vbtn.on { color: var(--accent); background: var(--accent-bg); }
+.vtable .cf { min-width: 0; padding-right: 28px; }
+.vtable .cf:has(> input) { padding-right: 0; }
+.vtable .cf.saving { opacity: .5; pointer-events: none; }
+.vtitle.ok { color: var(--good); background: var(--good-bg); }
+.vtable .cf-val.soft { border-color: transparent; background: transparent; color: var(--text2); padding-left: 2px; }
+.vtable .cf-val.soft:hover { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+.vtable .vnote .cf { flex: 1 1 160px; }
+.vadd { text-align: left; cursor: pointer; font-size: 13px; }
 .vnote-in { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-width: 0; }
 .vnote-text { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .xchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line2); background: var(--head); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; max-width: 100%; cursor: copy; color: var(--text); }

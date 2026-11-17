@@ -19,30 +19,22 @@
 {%- endmacro %}
 
 {% macro sidebar() %}
-{# 和合租账本页是同一个外壳：同一套左侧导航，账本那几项直接跳到对应分页 #}
+{# 和合租账本页是同一个外壳：同一套左侧导航。大分类拖分类名、小项直接拖，都能调整顺序（navdrag.js） #}
 {% set nav = hz_nav() %}
 {% set here = request.endpoint %}
-{% set ledger = url_for('hezu_page') %}
 <div class="shell">
- <nav class="side" aria-label="主导航">
+ <nav class="side" aria-label="主导航" data-csrf="{{ csrf_token() }}">
   <div class="brand"><div class="logo">租</div><span>合租管理</span></div>
-  <a class="nav" href="{{ ledger }}#home">{{ icon('grid') }}<span>总览</span></a>
-  <div class="nav-label">账号</div>
-  {% for s in nav.sheets %}
-  <a class="nav" href="{{ ledger }}#{{ s.id }}">{{ icon('users' if s.grouped else 'bolt' if s.resale else 'play') }}<span>{{ s.name }}</span><span class="count">{{ s.count }}</span></a>
+  <a class="nav" href="{{ url_for('hezu_page') }}#home">{{ icon('grid') }}<span>总览</span></a>
+  {% for sec in nav.sections %}
+  <div class="nav-sec" data-sec="{{ sec.id }}">
+   <div class="nav-label" draggable="true" title="拖动可以调整分类顺序">{{ sec.label }}</div>
+   {% for it in sec['items'] %}
+   <a class="nav{% if here in (it.on or []) %} on{% endif %}" href="{{ it.href }}" draggable="true" data-item="{{ it.id }}"{% if it.sheet %} data-sheet="1"{% endif %} title="拖动可以调整顺序">{{ icon(it.icon) }}<span>{{ it.text }}</span>{% if it.count is defined %}<span class="count">{{ it.count }}</span>{% endif %}</a>
+   {% endfor %}
+   {% if sec.newSheet %}<a class="nav" href="{{ url_for('hezu_page') }}#new-sheet" title="新建一张表">{{ icon('plus') }}<span>新建表</span></a>{% endif %}
+  </div>
   {% endfor %}
-  <a class="nav" href="{{ ledger }}#new-sheet" title="新建一张表">{{ icon('plus') }}<span>新建表</span></a>
-  <div class="nav-label">后台</div>
-  <a class="nav" href="{{ ledger }}#cards">{{ icon('card') }}<span>支付卡</span><span class="count">{{ nav.cards }}</span></a>
-  <a class="nav" href="{{ ledger }}#vps">{{ icon('server') }}<span>VPS</span><span class="count">{{ nav.vps }}</span></a>
-  <div class="nav-label">备份</div>
-  {% set vc = vault_counts() %}
-  <a class="nav{% if here == 'vault_page' %} on{% endif %}" href="{{ url_for('vault_page') }}">{{ icon('lock') }}<span>密码本</span><span class="count">{{ vc['items'] }}</span></a>
-  <a class="nav{% if here == 'notes_page' %} on{% endif %}" href="{{ url_for('notes_page') }}">{{ icon('note') }}<span>备忘录</span><span class="count">{{ vc['notes'] }}</span></a>
-  <div class="nav-label">验证码</div>
-  <a class="nav{% if here in ('dashboard', 'account_new', 'account_edit', 'groups_page') %} on{% endif %}" href="{{ url_for('dashboard') }}">{{ icon('key') }}<span>验证码账号</span><span class="count">{{ nav.accounts }}</span></a>
-  <a class="nav{% if here == 'access_logs' %} on{% endif %}" href="{{ url_for('access_logs') }}">{{ icon('list') }}<span>访问记录</span></a>
-  <a class="nav{% if here == 'settings' %} on{% endif %}" href="{{ url_for('settings') }}">{{ icon('gear') }}<span>设置</span></a>
   <div class="side-foot">
    <button class="nav" type="button" data-fx-toggle title="汇率计算器">{{ icon('fx') }}<span>汇率计算器</span></button>
    <form method="post" action="{{ url_for('logout') }}">

@@ -139,3 +139,39 @@ def test_types_save_with_revision(ctx):
     bad = [{"id": "x", "name": "X", "color": "red;background:url(x)"}]
     assert call(c, "put", f"{API}/types", json={"rev": 1, "types": bad}).get_json()["types"][0]["color"] == "#6c757d"
     assert call(c, "get", f"{API}/items").get_json()["types"][0]["name"] == "X"
+
+
+def test_patch_changes_one_field_and_keeps_secrets(ctx):
+    c = ctx.admin()
+    e = new_item(c)
+    r = call(c, "put", f"{API}/items/{e['id']}", json={"rev": 999, "patch": True, "force": True, "data": {"title": "新名字"}})
+    assert r.status_code == 200
+    full = call(c, "post", f"{API}/items/{e['id']}/reveal", json={}).get_json()["entry"]
+    assert full["title"] == "新名字" and full["password"] == PW and full["extras"][1]["value"] == SECRET_ANSWER
+    call(c, "put", f"{API}/items/{e['id']}", json={"rev": full["rev"], "patch": True, "data": {"password": "new-pw"}})
+    full = call(c, "post", f"{API}/items/{e['id']}/reveal", json={}).get_json()["entry"]
+    assert full["password"] == "new-pw" and full["account"] == "demo05@example.com"
+
+
+def test_sidebar_order_is_saved_and_shared(ctx):
+    c = ctx.admin()
+    api = "/admin/hezu/api"
+
+    def side(path):
+        html = call(c, "get", path).get_data(as_text=True)
+        return html.split('class="side"', 1)[1].split("</nav>", 1)[0]
+
+    r = call(c, "post", f"{api}/nav-order", json={"sections": ["backup", "totp"], "items": {"backup": ["notes"], "totp": ["settings", "bogus"]}})
+    order = r.get_json()["navOrder"]
+    assert order["sections"] == ["backup", "totp", "accounts", "backend"]
+    assert order["items"]["backup"] == ["notes", "vault"] and order["items"]["totp"] == ["settings", "dashboard", "logs"]
+    s = side("/admin/vault")
+    assert s.index('data-sec="backup"') < s.index('data-sec="totp"') < s.index('data-sec="accounts"')
+    assert s.index('data-item="notes"') < s.index('data-item="vault"')
+    assert call(c, "get", f"{api}/context").get_json()["navOrder"] == order      # 账本页也按这个顺序画
+    # 拖动「账号」里的表：直接改账本里表的顺序
+    call(c, "put", f"{api}/state", json={"rev": 0, "state": {"sheets": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}, {"id": "c", "name": "C"}], "months": {}, "vps": []}})
+    assert call(c, "post", f"{api}/sheet-order", json={"order": ["c", "a"]}).get_json()["ok"]
+    assert [x["id"] for x in call(c, "get", f"{api}/state").get_json()["state"]["sheets"]] == ["c", "a", "b"]
+    s = side("/admin/dashboard")
+    assert s.index('data-item="c"') < s.index('data-item="a"') < s.index('data-item="b"')

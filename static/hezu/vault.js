@@ -242,26 +242,98 @@
           h('span', { class: 'spacer' }),
           h('button', { class: 'btn small ghost', type: 'button', onclick: () => editItem(null, t ? t.id : '') }, icon('plus', 14), '添加')),
         h('div', { class: 'scroll' }, h('table', { class: 'grid vtable' },
-          h('colgroup', null, h('col', { style: 'width:15%' }), h('col', { style: 'width:22%' }), h('col', { style: 'width:150px' }), h('col', { style: 'width:150px' }), h('col', { style: 'width:84px' }), h('col'), h('col', { style: 'width:44px' })),
+          h('colgroup', null, h('col', { style: 'width:15%' }), h('col', { style: 'width:22%' }), h('col', { style: 'width:180px' }), h('col', { style: 'width:170px' }), h('col', { style: 'width:110px' }), h('col'), h('col', { style: 'width:44px' })),
           h('thead', null, h('tr', null, ['名称', '账号', '密码', '绑定手机', '官网', '备注', ''].map(x => h('th', { text: x })))),
           h('tbody', null, list.map(it => itemRow(it, t))))));
     }
 
-    function copyBtn(text, label, mono) {
-      if (!text) return h('span', { class: 'faint', text: '—' });
-      const b = h('button', { class: 'cf-val' + (mono ? ' mono' : ''), type: 'button', title: '点一下复制' + label + '\n' + text, onclick: () => copyNow(text, b) }, text);
-      return b;
+    // ---- 表格里直接改：有内容时点一下复制、旁边的小笔改；空着的格子直接是输入框（和账本页一样） ----
+    async function patch(it, changes, cellEl) {
+      if (cellEl) cellEl.classList.add('saving');
+      try {
+        const d = await api('PUT', 'items/' + it.id, { rev: it.rev, patch: true, force: true, data: changes });
+        if (!d.ok) throw new Error(d.error || '没保存上');
+        revealCache.delete(it.id);
+        Object.assign(it, d.entry);
+        toast('已保存');
+        return true;
+      } catch (e) { alertBox('没保存上：' + e.message); return false; }
+      finally { if (cellEl) cellEl.classList.remove('saving'); }
+    }
+    // 编辑框：回车或离开保存，Esc 放弃
+    function editor(value, opts, onSave, onCancel) {
+      const inp = h('input', { class: 'cell' + (opts.mono ? ' mono' : '') + (opts.strong ? ' strong' : ''), type: 'text', value: value || '', placeholder: opts.placeholder || '', autocomplete: 'off', spellcheck: false, 'aria-label': opts.label });
+      let done = false;
+      const finish = async save => {
+        if (done) return; done = true;
+        const v = opts.raw ? inp.value : inp.value.trim();
+        if (!save || v === (value || '')) return onCancel();
+        if (!await onSave(v)) { done = false; inp.focus(); }
+      };
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
+      inp.addEventListener('blur', () => finish(true));
+      return inp;
+    }
+    function penBtn(label, run) {
+      return h('button', { class: 'cf-edit', type: 'button', title: '修改' + label, 'aria-label': '修改' + label, onclick: run }, icon('pen', 13));
+    }
+    // 普通文字格：账号、手机号、名称、备注
+    function textCell(it, key, opts) {
+      const wrap = h('div', { class: 'cf' });
+      const draw = edit => {
+        const v = it[key] || '';
+        if (edit || !v) {
+          const inp = editor(v, opts, async nv => { if (await patch(it, { [key]: nv }, wrap)) { draw(false); return true; } return false; }, () => draw(false));
+          setKids(wrap, inp);
+          if (edit) { inp.focus(); inp.select(); }
+          return;
+        }
+        let shown;
+        if (opts.title) shown = h('button', { class: 'vtitle', type: 'button', title: '点一下复制名称\n' + v, onclick: () => copyNow(v, shown) }, v);
+        else shown = h('button', { class: 'cf-val' + (opts.mono ? ' mono' : '') + (opts.soft ? ' soft' : ''), type: 'button', title: '点一下复制' + opts.label + '\n' + v, onclick: () => copyNow(v, shown) }, opts.oneLine ? v.split('\n')[0] + (v.includes('\n') ? ' …' : '') : v);
+        setKids(wrap, shown, opts.oneLine && v.includes('\n') ? penBtn(opts.label, () => editItem(it)) : penBtn(opts.label, () => draw(true)));
+      };
+      draw(false);
+      return wrap;
     }
     function pwCell(it) {
-      if (!it.hasPassword) return h('span', { class: 'faint', text: '—' });
-      const val = h('button', { class: 'cf-val mono', type: 'button', title: '点一下复制密码', onclick: () => copyLater(reveal(it).then(e => e.password), val) }, '••••••••');
-      let timer = null;
-      const eye = h('button', { class: 'vbtn', type: 'button', title: '显示密码（10 秒后自动隐藏）', 'aria-label': '显示密码', onclick: async () => {
-        if (timer) { clearTimeout(timer); timer = null; val.textContent = '••••••••'; eye.classList.remove('on'); return; }
-        try { const e = await reveal(it); val.textContent = e.password; eye.classList.add('on'); timer = setTimeout(() => { val.textContent = '••••••••'; eye.classList.remove('on'); timer = null; }, 10000); }
-        catch (err) { alertBox(err.message); }
-      } }, icon('eye', 14));
-      return h('div', { class: 'pwcell' }, val, eye);
+      const wrap = h('div', { class: 'cf pwcell' });
+      const draw = (edit, current) => {
+        if (edit || !it.hasPassword) {
+          const inp = editor(current || '', { mono: true, raw: true, placeholder: '密码', label: '密码' },
+            async nv => { if (await patch(it, { password: nv }, wrap)) { draw(false); return true; } return false; }, () => draw(false));
+          setKids(wrap, inp);
+          if (edit) { inp.focus(); inp.select(); }
+          return;
+        }
+        const val = h('button', { class: 'cf-val mono', type: 'button', title: '点一下复制密码', onclick: () => copyLater(reveal(it).then(e => e.password), val) }, '••••••••');
+        let timer = null;
+        const eye = h('button', { class: 'vbtn', type: 'button', title: '显示密码（10 秒后自动隐藏）', 'aria-label': '显示密码', onclick: async () => {
+          if (timer) { clearTimeout(timer); timer = null; val.textContent = '••••••••'; eye.classList.remove('on'); return; }
+          try { const e = await reveal(it); val.textContent = e.password; eye.classList.add('on'); timer = setTimeout(() => { val.textContent = '••••••••'; eye.classList.remove('on'); timer = null; }, 10000); }
+          catch (err) { alertBox(err.message); }
+        } }, icon('eye', 14));
+        setKids(wrap, val, eye, penBtn('密码', async () => { try { draw(true, (await reveal(it)).password); } catch (err) { alertBox(err.message); } }));
+      };
+      draw(false);
+      return wrap;
+    }
+    function siteCell(it, t) {
+      const wrap = h('div', { class: 'cf' });
+      const draw = edit => {
+        const own = it.site || '', site = fixUrl(own || (t && t.site) || '');
+        if (edit) {
+          const inp = editor(own, { placeholder: t && t.site ? '留空用类型的官网' : '官网网址', label: '官网网址' },
+            async nv => { if (await patch(it, { site: fixUrl(nv) }, wrap)) { draw(false); return true; } return false; }, () => draw(false));
+          setKids(wrap, inp); inp.focus(); inp.select();
+          return;
+        }
+        setKids(wrap, site ? h('a', { class: 'site-link', href: site, target: '_blank', rel: 'noopener noreferrer', title: '打开 ' + site + (own ? '' : '（类型的官网）') }, h('span', { text: '官网' }), icon('link', 12))
+          : h('button', { class: 'cell faint vadd', type: 'button', text: '＋ 网址', onclick: () => draw(true) }),
+          site ? penBtn('官网网址', () => draw(true)) : null);
+      };
+      draw(false);
+      return wrap;
     }
     function extrasChips(it) {
       return (it.extras || []).map((x, i) => {
@@ -273,17 +345,15 @@
       });
     }
     function itemRow(it, t) {
-      const site = fixUrl(it.site || (t && t.site) || '');
-      const note = String(it.note || '');
       return h('tr', null,
-        h('td', null, h('button', { class: 'vtitle', type: 'button', title: '编辑这一条', onclick: () => editItem(it) }, it.title || h('span', { class: 'faint', text: '未命名' }))),
-        h('td', null, copyBtn(it.account, '账号', false)),
+        h('td', null, textCell(it, 'title', { label: '名称', placeholder: '名称', strong: true, title: true })),
+        h('td', null, textCell(it, 'account', { label: '账号', placeholder: '账号' })),
         h('td', null, pwCell(it)),
-        h('td', null, copyBtn(it.phone, '手机号', true)),
-        h('td', null, site ? h('a', { class: 'site-link', href: site, target: '_blank', rel: 'noopener noreferrer', title: '打开 ' + site }, h('span', { text: it.site ? '官网' : '官网' }), icon('link', 12)) : h('span', { class: 'faint', text: '—' })),
-        h('td', { class: 'vnote' }, h('div', { class: 'vnote-in' }, note ? h('span', { class: 'vnote-text', title: note, text: note.split('\n')[0] + (note.includes('\n') ? ' …' : '') }) : null, extrasChips(it))),
+        h('td', null, textCell(it, 'phone', { label: '手机号', placeholder: '手机号', mono: true })),
+        h('td', null, siteCell(it, t)),
+        h('td', { class: 'vnote' }, h('div', { class: 'vnote-in' }, textCell(it, 'note', { label: '备注', placeholder: '备注', soft: true, oneLine: true, raw: true }), extrasChips(it))),
         h('td', null, h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多', onclick: e => menu(e.currentTarget, [
-          { text: '编辑', run: () => editItem(it) },
+          { text: '编辑全部（类型、附加信息…）', run: () => editItem(it) },
           { text: '复制全部信息', run: () => copyAll(it) },
           { text: '复制一份', run: () => duplicate(it) },
           '-',

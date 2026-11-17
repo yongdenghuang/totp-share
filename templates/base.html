@@ -40,7 +40,8 @@
 </main>
 {% endif %}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-{% if session.admin_id %}<script src="{{ hz_static('hezu/fx.js') }}"></script>{% endif %}
+{% if session.admin_id %}<script src="{{ hz_static('hezu/fx.js') }}"></script>
+<script src="{{ hz_static('hezu/navdrag.js') }}"></script>{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>
