@@ -654,6 +654,8 @@
 
   // ---------- 输入框 ----------
   function maskNumber(v) { v = String(v || ''); const d = v.replace(/\s/g, ''); return /^\d{8,}$/.test(d) ? '•••• •••• •••• ' + d.slice(-4) : v; }
+  // 有效期：「1228」→「12/28」
+  function fmtExpiry(v) { v = String(v || '').trim(); const d = v.replace(/\D/g, ''); return v.includes('/') || d.length < 3 ? v : d.slice(0, 2) + '/' + d.slice(2, 6); }
   function maskAll(v) { return v ? '••••••••' : ''; }
   // opts: num, right, mask('card'|'all'), placeholder, cls, ro, after(), title
   function cell(obj, key, opts) {
@@ -725,10 +727,14 @@
   async function newCardDialog(issuer) {
     const number = h('input', { type: 'text', placeholder: '卡号', inputMode: 'numeric', autocomplete: 'off' });
     const note = h('input', { type: 'text', placeholder: '如 1 号卡、次卡，可不填' });
-    const ok = await dialog('给 ' + issuer.name + ' 新增卡号', [h('label', { class: 'field' }, '卡号', number), h('label', { class: 'field' }, '备注', note)],
+    const expiry = h('input', { type: 'text', placeholder: 'MM/YY', inputMode: 'numeric', autocomplete: 'off' });
+    const cvc = h('input', { type: 'text', placeholder: 'CVC', inputMode: 'numeric', autocomplete: 'off' });
+    const ok = await dialog('给 ' + issuer.name + ' 新增卡号', [h('label', { class: 'field' }, '卡号', number),
+      h('div', { class: 'field-row' }, h('label', { class: 'field' }, '有效期', expiry), h('label', { class: 'field' }, 'CVC', cvc)),
+      h('label', { class: 'field' }, '备注', note), h('div', { class: 'muted', text: '卡号、有效期和 CVC 都加密保存在服务器上。' })],
       [{ text: '取消' }, { text: '新增', cls: 'primary', value: true, run: () => { if (!number.value.trim() && !note.value.trim()) { number.focus(); return false; } } }]);
     if (!ok) return null;
-    const c = { id: 'c_' + uid(), issuerId: issuer.id, number: number.value.trim(), note: note.value.trim() };
+    const c = { id: 'c_' + uid(), issuerId: issuer.id, number: number.value.trim(), note: note.value.trim(), expiry: fmtExpiry(expiry.value), cvc: cvc.value.trim() };
     S.cards.push(c); touch(); return c;
   }
   // 返回两个格子：卡种、卡号
@@ -1357,7 +1363,9 @@
         own.map(c => {
           const s = cs.byCard[c.id] || { n: 0, cost: 0 };
           return h('div', { class: 'cardrow' },
-            cell(c, 'number', { mask: 'card', cls: 'mono', placeholder: '卡号', title: '点一下显示完整卡号', label: '卡号' }),
+            copyField(c, 'number', { mono: true, label: '卡号', placeholder: '卡号', title: '点一下复制完整卡号', display: maskNumber }),
+            copyField(c, 'expiry', { mono: true, label: '有效期', placeholder: 'MM/YY', onChange: () => { c.expiry = fmtExpiry(c.expiry); touch(); } }),
+            copyField(c, 'cvc', { mono: true, label: ' CVC', placeholder: 'CVC', title: '点一下复制 CVC', display: () => '•••' }),
             cell(c, 'note', { placeholder: '备注', label: '卡备注' }),
             h('div', { class: 'spend' }, money(s.cost), usageLink(h('small', { class: 'usage', text: s.n + ' 个账号' }), { cardId: c.id }, it.name + ' ' + cardLabel(c))),
             h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '删除卡号', title: '删除卡号', onclick: async () => {
@@ -1419,7 +1427,7 @@
       }
       if (!v[key]) return setKids(wrap, h('span', { class: 'ro faint', text: '—' }));
       const val = h('button', { class: 'cf-val' + (opts.mono ? ' mono' : '') + (opts.plain ? ' plain' : ''), type: 'button', title: opts.title || '点一下复制' + opts.label, onclick: () => copyQuiet(v[key], val) },
-        opts.mask ? '••••••••' : v[key]);
+        opts.display ? opts.display(v[key]) : opts.mask ? '••••••••' : v[key]);
       setKids(wrap, val, opts.ro ? null : h('button', { class: 'cf-edit', type: 'button', title: '修改' + opts.label, 'aria-label': '修改' + opts.label, onclick: () => draw(true) }, icon('pen', 13)));
     }
     draw(false);

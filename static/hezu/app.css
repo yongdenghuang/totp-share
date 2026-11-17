@@ -174,13 +174,13 @@ dialog.dlg::backdrop { background: rgba(10, 12, 24, .45); }
 .chipset { display: flex; gap: 6px; flex-wrap: wrap; }
 .fchip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 4px 12px; font-size: 13px; color: var(--text2); }
 .fchip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-.issuers { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 16px; align-items: start; }
+.issuers { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 16px; align-items: start; }
 .issuers .group { margin-bottom: 0; }
 .issuer-head { display: grid; grid-template-columns: minmax(0, 1fr) 110px auto; gap: 6px; align-items: center; padding: 10px 10px 4px 10px; }
 .issuer-head .cell.name { font-size: 15px; font-weight: 650; }
 .issuer-meta { padding: 0 18px 10px; font-size: 13px; color: var(--text2); display: flex; gap: 14px; flex-wrap: wrap; }
 .issuer-meta b { color: var(--text); font-variant-numeric: tabular-nums; }
-.cardrow { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 84px 34px; gap: 4px; align-items: center; padding: 3px 10px; border-top: 1px solid var(--line); min-height: 44px; }
+.cardrow { display: grid; grid-template-columns: minmax(0, 1.5fr) 92px 78px minmax(0, 1fr) 84px 34px; gap: 4px; align-items: center; padding: 3px 10px; border-top: 1px solid var(--line); min-height: 44px; }
 .cardrow .spend { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; padding-right: 6px; }
 .cardrow .spend small { display: block; color: var(--text3); font-size: 11px; }
 .cell.mono { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
@@ -324,3 +324,11 @@ table.grid.unitsheet .cell.strong { font-size: 14.5px; }
 .usage-head { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 10px; padding: 4px 10px 2px; font-size: 11.5px; color: var(--text3); border-bottom: 1px solid var(--line); margin-bottom: 2px; }
 .usage-item { grid-template-columns: 120px minmax(0, 1fr) auto !important; }
 .usage-where { overflow: hidden; text-overflow: ellipsis; }
+
+/* 支付卡：手机上卡号一行，有效期、CVC、备注一行 */
+@media (max-width: 880px) {
+  .issuers { grid-template-columns: minmax(0, 1fr); }
+  .cardrow { grid-template-columns: minmax(0, 1fr) 84px 34px; grid-template-areas: "num spend del" "exp cvc ." "note note ."; row-gap: 2px; padding: 8px 10px; }
+  .cardrow > :nth-child(1) { grid-area: num; } .cardrow > :nth-child(2) { grid-area: exp; } .cardrow > :nth-child(3) { grid-area: cvc; }
+  .cardrow > :nth-child(4) { grid-area: note; } .cardrow > :nth-child(5) { grid-area: spend; } .cardrow > :nth-child(6) { grid-area: del; }
+}
