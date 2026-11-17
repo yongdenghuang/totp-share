@@ -118,7 +118,8 @@ def context():
                 for r in _core.query_all(
                     """SELECT id, name, group_name, password_encrypted IS NOT NULL AS has_password
                        FROM accounts ORDER BY COALESCE(sort_order, 999999), created_at DESC""")]
-    return {"groups": groups, "accounts": accounts}
+    import vault   # 左侧导航上密码本、备忘录的数量（账本页的导航由 app.js 画）
+    return {"groups": groups, "accounts": accounts, "vault": vault.counts()}
 
 
 def shell_nav():

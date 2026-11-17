@@ -306,11 +306,11 @@ def test_totp_pages_share_the_ledger_sidebar(ctx):
         on = html.split('class="nav on"', 1)[1].split("</a>", 1)[0]
         assert active in on
         assert html.count('class="nav on"') == 1
-    # 导航里的数量来自账本：这个月 AI 合租 1 个账号、1 张卡、1 台 VPS、2 个验证码账号
+    # 导航里的数量来自账本：这个月 AI 合租 1 个账号、1 张卡、1 台 VPS、密码本 0 条、备忘录 0 条、2 个验证码账号
     html = call(c, "get", "/admin/dashboard").get_data(as_text=True)
     side = html.split('class="side"', 1)[1].split("</nav>", 1)[0]
     counts = [x.split("<")[0] for x in side.split('class="count">')[1:]]
-    assert counts == ["1", "0", "1", "1", "2"]
+    assert counts == ["1", "0", "1", "1", "0", "0", "2"]
 
 
 def test_public_and_login_pages_have_no_sidebar(ctx):

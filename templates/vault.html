@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ '密码本' if page == 'vault' else '备忘录' }} · 合租管理</title>
+<link rel="stylesheet" href="{{ hz_static('hezu/shell.css') }}">
+<link rel="stylesheet" href="{{ hz_static('hezu/app.css') }}">
+<link rel="stylesheet" href="{{ hz_static('hezu/vault.css') }}">
+</head>
+<body class="hz vault-body">
+{% from '_shell.html' import sidebar with context %}
+{{ sidebar() }}
+ <main class="main"><div id="vault" data-page="{{ page }}" data-csrf="{{ csrf_token() }}"></div></main>
+</div>
+<script src="{{ hz_static('hezu/fx.js') }}"></script>
+<script src="{{ hz_static('hezu/vault.js') }}"></script>
+</body>
+</html>

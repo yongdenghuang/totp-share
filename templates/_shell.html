@@ -1,0 +1,54 @@
+{# 后台共用的左侧导航（验证码各页、密码本、备忘录）。合租账本页的导航由 app.js 画，两边要保持一致。 #}
+{% macro icon(name) -%}
+<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if name == 'grid' %}<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+{%- elif name == 'users' %}<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+{%- elif name == 'play' %}<rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="m10 8 5 3-5 3z"/>
+{%- elif name == 'card' %}<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/>
+{%- elif name == 'server' %}<rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/>
+{%- elif name == 'plus' %}<path d="M12 5v14M5 12h14"/>
+{%- elif name == 'key' %}<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>
+{%- elif name == 'list' %}<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
+{%- elif name == 'gear' %}<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>
+{%- elif name == 'bolt' %}<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>
+{%- elif name == 'fx' %}<path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>
+{%- elif name == 'lock' %}<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="M12 15v2"/>
+{%- elif name == 'note' %}<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/>
+{%- elif name == 'out' %}<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>
+{%- endif %}</svg>
+{%- endmacro %}
+
+{% macro sidebar() %}
+{# 和合租账本页是同一个外壳：同一套左侧导航，账本那几项直接跳到对应分页 #}
+{% set nav = hz_nav() %}
+{% set here = request.endpoint %}
+{% set ledger = url_for('hezu_page') %}
+<div class="shell">
+ <nav class="side" aria-label="主导航">
+  <div class="brand"><div class="logo">租</div><span>合租管理</span></div>
+  <a class="nav" href="{{ ledger }}#home">{{ icon('grid') }}<span>总览</span></a>
+  <div class="nav-label">账号</div>
+  {% for s in nav.sheets %}
+  <a class="nav" href="{{ ledger }}#{{ s.id }}">{{ icon('users' if s.grouped else 'bolt' if s.resale else 'play') }}<span>{{ s.name }}</span><span class="count">{{ s.count }}</span></a>
+  {% endfor %}
+  <a class="nav" href="{{ ledger }}#new-sheet" title="新建一张表">{{ icon('plus') }}<span>新建表</span></a>
+  <div class="nav-label">后台</div>
+  <a class="nav" href="{{ ledger }}#cards">{{ icon('card') }}<span>支付卡</span><span class="count">{{ nav.cards }}</span></a>
+  <a class="nav" href="{{ ledger }}#vps">{{ icon('server') }}<span>VPS</span><span class="count">{{ nav.vps }}</span></a>
+  <div class="nav-label">备份</div>
+  {% set vc = vault_counts() %}
+  <a class="nav{% if here == 'vault_page' %} on{% endif %}" href="{{ url_for('vault_page') }}">{{ icon('lock') }}<span>密码本</span><span class="count">{{ vc['items'] }}</span></a>
+  <a class="nav{% if here == 'notes_page' %} on{% endif %}" href="{{ url_for('notes_page') }}">{{ icon('note') }}<span>备忘录</span><span class="count">{{ vc['notes'] }}</span></a>
+  <div class="nav-label">验证码</div>
+  <a class="nav{% if here in ('dashboard', 'account_new', 'account_edit', 'groups_page') %} on{% endif %}" href="{{ url_for('dashboard') }}">{{ icon('key') }}<span>验证码账号</span><span class="count">{{ nav.accounts }}</span></a>
+  <a class="nav{% if here == 'access_logs' %} on{% endif %}" href="{{ url_for('access_logs') }}">{{ icon('list') }}<span>访问记录</span></a>
+  <a class="nav{% if here == 'settings' %} on{% endif %}" href="{{ url_for('settings') }}">{{ icon('gear') }}<span>设置</span></a>
+  <div class="side-foot">
+   <button class="nav" type="button" data-fx-toggle title="汇率计算器">{{ icon('fx') }}<span>汇率计算器</span></button>
+   <form method="post" action="{{ url_for('logout') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="nav" type="submit">{{ icon('out') }}<span>退出登录</span></button>
+   </form>
+  </div>
+ </nav>
+{% endmacro %}

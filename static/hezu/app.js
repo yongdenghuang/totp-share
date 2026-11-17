@@ -22,12 +22,15 @@
     pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
     link: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
     fx: '<path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="M12 15v2"/>',
+    note: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/>',
     gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>',
   };
 
   let S = null;                       // 账本数据（加密存在服务器上）
   let G = [];                         // 分组：和验证码账号共用一套，以验证码后台为准
   let A = [];                         // 验证码账号名单（不含密钥和密码）
+  let VC = { items: 0, notes: 0 };    // 密码本、备忘录的条数（导航上显示）
   let CSRF = document.getElementById('app').dataset.csrf || '';
   const API = '/admin/hezu/api';
   const codes = { map: {}, until: 0, period: 30, timer: null, els: [], timers: [] };   // 当前验证码，只显示不保存
@@ -357,7 +360,7 @@
     }
     return r;
   }
-  function useContext(d) { if (d.csrf) CSRF = d.csrf; if (d.groups) G = d.groups; if (d.accounts) A = d.accounts; }
+  function useContext(d) { if (d.csrf) CSRF = d.csrf; if (d.groups) G = d.groups; if (d.accounts) A = d.accounts; if (d.vault) VC = d.vault; }
   async function refreshContext() {
     try {
       const r = await fetch(API + '/context', { credentials: 'same-origin' });
@@ -1943,6 +1946,8 @@
       h('button', { class: 'nav', type: 'button', title: '新建一张表', onclick: () => sheetForm(null) }, icon('plus'), h('span', { text: '新建表' })),
       h('div', { class: 'nav-label', text: '后台' }),
       nav('cards', '支付卡', 'card', S.cards.length), nav('vps', 'VPS', 'server', S.vps.length),
+      h('div', { class: 'nav-label', text: '备份' }),
+      link('/admin/vault', '密码本', 'lock', VC.items), link('/admin/notes', '备忘录', 'note', VC.notes),
       h('div', { class: 'nav-label', text: '验证码' }),
       link('/admin/dashboard', '验证码账号', 'key', A.length), link('/admin/logs', '访问记录', 'list'), link('/admin/settings', '设置', 'gear'),
       h('div', { class: 'side-foot' }, statusEl,

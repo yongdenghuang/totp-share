@@ -89,6 +89,26 @@ CREATE TABLE IF NOT EXISTS hezu_history (
 );
 """
 
+# 密码本和备忘录：一条一行，整条加密；deleted_at 不为空 = 在「最近删除」里
+VAULT_SQL = """
+CREATE TABLE IF NOT EXISTS vault_entries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL,
+    data_encrypted  BLOB NOT NULL,
+    rev             INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    deleted_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_vault_kind ON vault_entries(kind, deleted_at);
+CREATE TABLE IF NOT EXISTS vault_meta (
+    key             TEXT PRIMARY KEY,
+    rev             INTEGER NOT NULL,
+    data_encrypted  BLOB NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+"""
+
 
 def ensure_schema(db):
     """把数据库补齐到当前版本。返回本次实际执行的变更列表。"""
@@ -136,6 +156,10 @@ def ensure_schema(db):
     if "hezu_state" not in tables:
         changes.append("hezu_state")
     db.executescript(HEZU_SQL)
+
+    if "vault_entries" not in tables:
+        changes.append("vault_entries")
+    db.executescript(VAULT_SQL)
 
     db.commit()
     return changes

@@ -1,0 +1,109 @@
+/* 密码本、备忘录。配色变量、按钮、表格、对话框沿用 shell.css 和 app.css */
+.small { font-size: 12.5px; }
+.nowrap { white-space: nowrap; }
+textarea { font: inherit; color: inherit; }
+
+/* —— 密码本 —— */
+.vchips { margin-bottom: 14px; }
+.vchips .fchip b { font-weight: 600; opacity: .7; font-variant-numeric: tabular-nums; }
+.vchips .fchip.on b { opacity: .9; }
+.vchips .trash-chip { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
+.vt-chip { display: inline-flex; align-items: center; background: var(--tb); color: var(--tf); border-radius: 999px; padding: 3px 12px; font-weight: 650; font-size: 14px; white-space: nowrap; }
+.vt-chip.small { font-size: 12px; padding: 2px 9px; font-weight: 600; }
+.vgroup .group-head { padding: 11px 14px; }
+.site-link.small { font-size: 12.5px; padding: 2px 8px; }
+table.vtable { table-layout: fixed; min-width: 960px; }
+table.vtable td { padding: 6px 6px; height: 50px; }
+table.vtable td .cf-val { max-width: 100%; display: inline-block; vertical-align: middle; }
+.vtitle { border: 0; background: transparent; padding: 4px 6px; margin-left: -6px; font-weight: 650; font-size: 14px; text-align: left; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 7px; color: var(--text); }
+.vtitle:hover { background: var(--accent-bg); color: var(--accent); }
+.pwcell { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.pwcell .cf-val { flex: 0 1 auto; }
+.vbtn { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text3); display: inline-flex; align-items: center; justify-content: center; }
+.vbtn:hover, .vbtn.on { color: var(--accent); background: var(--accent-bg); }
+.vnote-in { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-width: 0; }
+.vnote-text { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.xchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line2); background: var(--head); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; max-width: 100%; cursor: copy; color: var(--text); }
+.xchip .xl { color: var(--text3); white-space: nowrap; }
+.xchip .xv { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.xchip:hover { border-color: var(--accent); background: var(--accent-bg); }
+.xchip:hover .xl { color: var(--accent); }
+.xchip.ok { border-color: transparent; background: var(--good-bg); color: var(--good); font-weight: 600; }
+.vempty { display: grid; gap: 10px; justify-items: start; padding: 26px 20px; font-size: 14px; color: var(--text); }
+
+/* 添加 / 编辑对话框 */
+dialog.dlg.vdlg { width: min(680px, calc(100vw - 24px)); }
+.vdlg .body { white-space: normal; max-height: calc(100vh - 170px); overflow-y: auto; }
+.vform { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+.field textarea { border: 1px solid var(--line2); background: var(--panel); border-radius: 9px; padding: 8px 10px; font-size: 14px; color: var(--text); width: 100%; outline: none; resize: vertical; min-height: 64px; line-height: 1.55; }
+.field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.field input.mono, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.pwrow { display: flex; gap: 6px; align-items: center; }
+.pwrow input { flex: 1; min-width: 0; }
+.pwrow .btn { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.xlist { display: grid; gap: 6px; justify-items: start; }
+.xrow { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto auto; gap: 6px; align-items: center; width: 100%; }
+.xrow input[type=text] { border: 1px solid var(--line2); background: var(--panel); border-radius: 9px; padding: 6px 9px; min-width: 0; font-size: 14px; color: var(--text); outline: none; }
+.xrow input[type=text]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.check.small { font-size: 12.5px; color: var(--text2); white-space: nowrap; }
+.xlist > .btn, .tlist > .btn { display: inline-flex; align-items: center; gap: 4px; }
+.tlist { display: grid; gap: 6px; justify-items: start; }
+.trow { display: grid; grid-template-columns: 36px 130px minmax(0, 1fr) auto auto auto; gap: 6px; align-items: center; width: 100%; }
+.trow input[type=text] { border: 1px solid var(--line2); background: var(--panel); border-radius: 9px; padding: 6px 9px; min-width: 0; font-size: 14px; color: var(--text); outline: none; }
+.trow input[type=color] { width: 36px; height: 32px; padding: 2px; border: 1px solid var(--line2); border-radius: 9px; background: var(--panel); cursor: pointer; }
+.btn.icon.danger { color: var(--bad); }
+.btn.icon:disabled { opacity: .25; }
+
+/* 提示 */
+.vtoast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 16px); background: var(--text); color: var(--bg); padding: 9px 18px; border-radius: 999px; font-size: 13.5px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 50; box-shadow: var(--shadow-pop); }
+.vtoast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* —— 备忘录：左边列表，右边正文 —— */
+.notes { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100vh; }
+.nlist { display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--panel); min-height: 0; }
+.nhead { display: flex; align-items: center; gap: 8px; padding: 16px 16px 10px; }
+.nhead h1 { font-size: 20px; margin: 0; font-weight: 650; }
+.nlist .search { margin: 0 12px 8px; min-width: 0; }
+.nitems { flex: 1; overflow-y: auto; padding: 2px 8px 10px; min-height: 0; }
+.nitem { display: block; width: 100%; text-align: left; border: 0; background: transparent; border-radius: 10px; padding: 9px 12px; margin-bottom: 2px; color: var(--text); }
+.nitem:hover { background: var(--hover); }
+.nitem.on { background: var(--accent-bg); }
+.nitem .nt { display: flex; align-items: center; gap: 5px; font-weight: 650; font-size: 14.5px; }
+.nitem .nt span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nitem .nt svg { color: var(--warn); }
+.nitem .np { display: flex; gap: 8px; font-size: 12.5px; color: var(--text3); margin-top: 1px; min-width: 0; }
+.nitem .np span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nitem .nd { color: var(--text2); flex: none; }
+.nitem.trashed { cursor: default; }
+.nitem .nrow { display: flex; gap: 6px; margin-top: 7px; }
+.nempty { padding: 18px 12px; color: var(--text3); font-size: 13px; }
+.ntrash { display: flex; align-items: center; gap: 6px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--text2); padding: 11px 20px; text-align: left; font-size: 13px; }
+.ntrash:hover { background: var(--hover); color: var(--text); }
+.ntrash b { font-weight: 600; }
+.neditor { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); }
+.nbar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); min-height: 52px; }
+.nbar .nback { display: none; align-items: center; gap: 2px; }
+.nbar .btn.icon.on { color: var(--warn); background: var(--warn-bg); }
+.nmeta { font-size: 12.5px; }
+.nstatus { font-size: 12.5px; color: var(--text3); }
+.nstatus.err { color: var(--bad); font-weight: 600; }
+.ntext { flex: 1; width: 100%; border: 0; outline: none; resize: none; background: transparent; padding: 22px 34px 60px; font-size: 15.5px; line-height: 1.75; color: var(--text); max-width: 980px; }
+.ntext::placeholder { color: var(--text3); }
+.nblank { margin: auto; display: grid; gap: 12px; justify-items: center; color: var(--text3); }
+.nblank .btn, .nhead .btn { display: inline-flex; align-items: center; gap: 4px; }
+
+@media (max-width: 880px) {
+  .vform { grid-template-columns: 1fr; }
+  .xrow { grid-template-columns: 1fr 1fr auto auto; }
+  .trow { grid-template-columns: 36px 1fr auto auto auto; }
+  .trow input[type=text]:nth-of-type(2) { grid-column: 1 / -1; grid-row: 2; }
+  .vchips .trash-chip { margin-left: 0; }
+  .notes { display: block; height: auto; }
+  .nlist { border-right: 0; min-height: calc(100vh - 52px); }
+  .neditor { display: none; min-height: calc(100vh - 52px); }
+  .notes.editing .nlist { display: none; }
+  .notes.editing .neditor { display: flex; }
+  .nbar .nback { display: inline-flex; }
+  .nbar .nmeta { display: none; }
+  .ntext { padding: 16px 18px 60px; font-size: 16px; }
+}

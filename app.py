@@ -355,7 +355,7 @@ def login_required(f):
         logged_in = admin_session_valid()
         if not logged_in:
             if (request.is_json or request.endpoint == "admin_codes"
-                    or request.path.startswith("/admin/hezu/api/")):
+                    or request.path.startswith(("/admin/hezu/api/", "/admin/vault/api/"))):
                 return jsonify(ok=False, error="登录已过期，请刷新页面重新登录"), 401
             return redirect(url_for("login", next=request.path))
         if request.endpoint != "admin_codes":
@@ -1022,6 +1022,8 @@ def rate_limited(e):
 import sys      # noqa: E402
 import hezu     # noqa: E402
 hezu.install(sys.modules[__name__])
+import vault    # noqa: E402
+vault.install(sys.modules[__name__])
 
 if __name__ == "__main__":
     app.run(host=os.environ.get("BIND_ADDR", "127.0.0.1"),
