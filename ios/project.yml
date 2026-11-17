@@ -21,6 +21,7 @@ targets:
         PRODUCT_NAME: 合租管理
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_KEY_CFBundleDisplayName: 合租管理
     info:
@@ -37,3 +38,6 @@ targets:
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         NSFaceIDUsageDescription: 用面容 ID 解锁合租管理，防止别人拿到手机就能看到你的账号和密码。
         ITSAppUsesNonExemptEncryption: false
+        # 只放行本机地址的 http（在模拟器里连电脑上的测试服务器）；正式地址仍然只能用 https
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true

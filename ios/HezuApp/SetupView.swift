@@ -15,7 +15,8 @@ struct SetupView: View {
             Text("合租管理").font(.title.weight(.semibold)).foregroundColor(.white)
             Text("填写你的后台网址，以后打开 App 就直接进入。")
                 .foregroundColor(.white.opacity(0.65)).multilineTextAlignment(.center)
-            TextField("例如 https://example.com", text: $text)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("", text: $text, prompt: Text("例如 https://example.com").foregroundColor(.white.opacity(0.35)))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
@@ -36,6 +37,7 @@ struct SetupView: View {
             Spacer()
             Text("登录时勾选「记住这台设备」，30 天内打开不用再输密码。App 每次打开会先用面容 ID 解锁。")
                 .font(.caption).foregroundColor(.white.opacity(0.45)).multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(28)
         .onAppear { focused = true }

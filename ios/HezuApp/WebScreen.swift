@@ -13,6 +13,16 @@ struct WebScreen: View {
                 .ignoresSafeArea(.container, edges: .bottom)
             if let err = web.loadError {
                 ErrorOverlay(message: err) { web.reload(home: home) }
+            } else if !web.ready {
+                // 第一次打开、网页还没画出来时：显示标志和转圈，而不是一片空白
+                ZStack {
+                    Color("LaunchBackground").ignoresSafeArea()
+                    VStack(spacing: 22) {
+                        AppMark(size: 72)
+                        ProgressView().tint(.white)
+                    }
+                }
+                .transition(.opacity)
             }
         }
         .onAppear { web.open(home) }
@@ -48,6 +58,7 @@ struct WebViewHost: UIViewRepresentable {
 @MainActor
 final class WebController: NSObject, ObservableObject {
     @Published var loadError: String?
+    @Published var ready = false        // 网页第一次画出来之前为 false
     let webView: WKWebView
     private var home: URL?
     fileprivate var pending: [ObjectIdentifier: URL] = [:]   // 正在下载的文件 → 存到哪里
@@ -58,6 +69,14 @@ final class WebController: NSObject, ObservableObject {
         config.applicationNameForUserAgent = "Mobile/15E148 Safari/604.1 HezuApp/1.0"
         config.allowsInlineMediaPlayback = true
         config.dataDetectorTypes = []                 // 不要把账号、手机号自动变成链接
+        // 点输入框时 iOS 会自动放大页面（字号小于 16 时），在 App 里看着像页面乱跳：禁止自动缩放
+        config.userContentController.addUserScript(WKUserScript(source: """
+            (function () {
+              var m = document.querySelector('meta[name=viewport]');
+              if (!m) { m = document.createElement('meta'); m.name = 'viewport'; document.head.appendChild(m); }
+              m.content = 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover';
+            })();
+            """, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
         webView.navigationDelegate = self
@@ -74,13 +93,36 @@ final class WebController: NSObject, ObservableObject {
         refresh.tintColor = .white
         refresh.addTarget(self, action: #selector(pulled(_:)), for: .valueChanged)
         webView.scrollView.refreshControl = refresh
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.rememberCookies() }
+        }
     }
 
     func open(_ url: URL) {
         if home?.host == url.host && home?.port == url.port && webView.url != nil { return }
         home = url
         loadError = nil
-        webView.load(URLRequest(url: url))
+        guard let host = url.host else { webView.load(URLRequest(url: url)); return }
+        // 先把钥匙串里存的登录状态放回网页里，再打开，这样「记住这台设备」不会因为 App 被划掉而丢
+        var cookies = CookieVault.load(for: host)
+        #if DEBUG
+        // 只在调试版里：模拟器自动化测试时用环境变量 HEZU_DEBUG_COOKIE=名称=值 直接带上登录状态
+        if let raw = ProcessInfo.processInfo.environment["HEZU_DEBUG_COOKIE"], let eq = raw.firstIndex(of: "="),
+           let c = HTTPCookie(properties: [.name: String(raw[..<eq]), .value: String(raw[raw.index(after: eq)...]),
+                                           .domain: host, .path: "/", .expires: Date().addingTimeInterval(30 * 86400)]) {
+            cookies.append(c)
+        }
+        #endif
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        let group = DispatchGroup()
+        for c in cookies { group.enter(); store.setCookie(c) { group.leave() } }
+        group.notify(queue: .main) { [weak self] in self?.webView.load(URLRequest(url: url)) }
+    }
+
+    /// 把当前的登录状态存进钥匙串（页面加载完、App 切到后台时）
+    func rememberCookies() {
+        guard let host = home?.host else { return }
+        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { CookieVault.save($0, for: host) }
     }
 
     func reload(home url: URL) {
@@ -148,7 +190,9 @@ extension WebController: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if !ready { withAnimation(.easeOut(duration: 0.2)) { ready = true } }
         loadError = nil
+        rememberCookies()
         webView.scrollView.refreshControl?.endRefreshing()
     }
 
