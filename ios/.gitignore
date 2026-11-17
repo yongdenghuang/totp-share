@@ -1,0 +1,6 @@
+# 由 xcodegen 根据 project.yml 生成，不提交
+HezuApp.xcodeproj/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/

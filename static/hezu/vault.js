@@ -345,14 +345,16 @@
       });
     }
     function itemRow(it, t) {
+      // data-label 给手机上的卡片样式用；空着的格子在手机上收起来（要填就点 ⋯ → 编辑全部）
+      const td = (label, key, content, cls) => h('td', { class: (cls || '') + (key && !it[key] ? ' is-empty' : ''), 'data-label': label }, content);
       return h('tr', null,
-        h('td', null, textCell(it, 'title', { label: '名称', placeholder: '名称', strong: true, title: true })),
-        h('td', null, textCell(it, 'account', { label: '账号', placeholder: '账号' })),
-        h('td', null, pwCell(it)),
-        h('td', null, textCell(it, 'phone', { label: '手机号', placeholder: '手机号', mono: true })),
-        h('td', null, siteCell(it, t)),
-        h('td', { class: 'vnote' }, h('div', { class: 'vnote-in' }, textCell(it, 'note', { label: '备注', placeholder: '备注', soft: true, oneLine: true, raw: true }), extrasChips(it))),
-        h('td', null, h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多', onclick: e => menu(e.currentTarget, [
+        td('名称', null, textCell(it, 'title', { label: '名称', placeholder: '名称', strong: true, title: true }), 'vt-title'),
+        td('账号', 'account', textCell(it, 'account', { label: '账号', placeholder: '账号' })),
+        td('密码', 'hasPassword', pwCell(it)),
+        td('绑定手机', 'phone', textCell(it, 'phone', { label: '手机号', placeholder: '手机号', mono: true })),
+        td('官网', null, siteCell(it, t), it.site || (t && t.site) ? '' : 'is-empty'),
+        td('备注', null, h('div', { class: 'vnote-in' }, textCell(it, 'note', { label: '备注', placeholder: '备注', soft: true, oneLine: true, raw: true }), extrasChips(it)), 'vnote' + (it.note || (it.extras || []).length ? '' : ' is-empty')),
+        h('td', { class: 'vt-more' }, h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多', onclick: e => menu(e.currentTarget, [
           { text: '编辑全部（类型、附加信息…）', run: () => editItem(it) },
           { text: '复制全部信息', run: () => copyAll(it) },
           { text: '复制一份', run: () => duplicate(it) },

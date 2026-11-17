@@ -1,0 +1,39 @@
+# 用 XcodeGen 生成 Xcode 工程：在 ios/ 目录下运行 `xcodegen`，然后打开 HezuApp.xcodeproj
+name: HezuApp
+options:
+  bundleIdPrefix: com.hezu
+  deploymentTarget:
+    iOS: "16.0"
+  developmentLanguage: zh-Hans
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+targets:
+  HezuApp:
+    type: application
+    platform: iOS
+    sources: [HezuApp]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hezu.manager
+        PRODUCT_NAME: 合租管理
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_KEY_CFBundleDisplayName: 合租管理
+    info:
+      path: HezuApp/Info.plist
+      properties:
+        CFBundleDisplayName: 合租管理
+        CFBundleDevelopmentRegion: zh-Hans
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        NSFaceIDUsageDescription: 用面容 ID 解锁合租管理，防止别人拿到手机就能看到你的账号和密码。
+        ITSAppUsesNonExemptEncryption: false

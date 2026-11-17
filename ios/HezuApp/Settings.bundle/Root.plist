@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PreferenceSpecifiers</key>
+	<array>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>服务器</string>
+			<key>FooterText</key>
+			<string>后台的网址，例如 https://example.com。改了以后回到 App 会重新打开。</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSTextFieldSpecifier</string>
+			<key>Title</key>
+			<string>网址</string>
+			<key>Key</key>
+			<string>server_url</string>
+			<key>KeyboardType</key>
+			<string>URL</string>
+			<key>AutocapitalizationType</key>
+			<string>None</string>
+			<key>AutocorrectionType</key>
+			<string>No</string>
+			<key>DefaultValue</key>
+			<string></string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>安全</string>
+			<key>FooterText</key>
+			<string>开启后，打开 App 和从后台回来时要用面容 ID（或锁屏密码）解锁。</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Title</key>
+			<string>面容 ID 解锁</string>
+			<key>Key</key>
+			<string>lock_enabled</string>
+			<key>DefaultValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>离开多久后重新上锁</string>
+			<key>Key</key>
+			<string>lock_after</string>
+			<key>DefaultValue</key>
+			<string>60</string>
+			<key>Titles</key>
+			<array>
+				<string>立即</string>
+				<string>1 分钟</string>
+				<string>5 分钟</string>
+				<string>15 分钟</string>
+				<string>1 小时</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<string>0</string>
+				<string>60</string>
+				<string>300</string>
+				<string>900</string>
+				<string>3600</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

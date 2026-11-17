@@ -101,6 +101,29 @@ dialog.dlg.vdlg { width: min(680px, calc(100vw - 24px)); }
 .nblank .btn, .nhead .btn { display: inline-flex; align-items: center; gap: 4px; }
 
 @media (max-width: 880px) {
+  /* 密码本在手机上：每条一张卡片，左边小字是字段名 */
+  .view { padding-left: 12px; padding-right: 12px; }
+  .top { padding-left: 14px; padding-right: 14px; }
+  .top .search { flex: 1 1 100%; order: 5; }
+  .vgroup .scroll { overflow: visible; }
+  table.vtable { min-width: 0; table-layout: auto; display: block; }
+  .vtable colgroup, .vtable thead { display: none; }
+  .vtable tbody { display: block; }
+  .vtable tr { display: block; position: relative; padding: 10px 14px 12px; border-top: 1px solid var(--line); }
+  .vtable tbody tr:hover td { background: transparent; }
+  table.vtable td { display: flex; align-items: center; gap: 10px; height: auto; border: 0; padding: 3px 0; min-height: 38px; }
+  table.vtable td:first-child { padding-left: 0; }
+  .vtable td::before { content: attr(data-label); flex: none; width: 58px; color: var(--text3); font-size: 12.5px; }
+  .vtable td > * { flex: 1; min-width: 0; }
+  .vtable td.is-empty { display: none; }
+  .vtable td.vt-title { padding-right: 40px; min-height: 34px; }
+  .vtable td.vt-title::before { display: none; }
+  .vtable td.vt-title .vtitle { font-size: 15.5px; }
+  .vtable td.vt-more { position: absolute; top: 8px; right: 8px; min-height: 0; padding: 0; }
+  .vtable td.vt-more::before { display: none; }
+  .vtable .cf-edit { opacity: 1; }
+  .vtable .cf { padding-right: 32px; }
+  .vtable .cf .cf-val { max-width: 100%; }
   .vform { grid-template-columns: 1fr; }
   .xrow { grid-template-columns: 1fr 1fr auto auto; }
   .trow { grid-template-columns: 36px 1fr auto auto auto; }
