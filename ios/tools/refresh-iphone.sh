@@ -42,7 +42,14 @@ fi
 trap 'rm -rf "$LOCK"' EXIT
 
 log "手机上的版本还剩 ${left} 小时，开始续签"
-if ! xcrun devicectl list devices 2>/dev/null | grep "$DEVICE" | grep -q "available"; then
+reachable() { xcrun devicectl list devices 2>/dev/null | grep "$DEVICE" | grep -q "available (paired)"; }
+# 手机锁屏后 Wi-Fi 连接会时有时无：最多试 1 分钟，中间主动连一下
+for _ in 1 2 3 4 5 6; do
+  reachable && break
+  xcrun devicectl device info details --device "$DEVICE" >/dev/null 2>&1
+  sleep 10
+done
+if ! reachable; then
   log "找不到 iPhone（不在同一个 Wi-Fi、关机或锁着），下个小时再试"
   if [ "$left" -lt 24 ]; then notify "还剩 ${left} 小时过期，但连不上 iPhone。请让手机和 Mac 连同一个 Wi-Fi 并解锁一下。"; fi
   exit 0
