@@ -10,7 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from flask import jsonify, request
+from flask import jsonify, render_template, request
 
 PREFIX = "/api/app/gpt/"
 TIMEOUT = 25
@@ -111,6 +111,11 @@ def install(core):
     @app.errorhandler(Sub2apiError)
     def sub2api_error(e):
         return jsonify(ok=False, error=str(e)), e.status
+
+    @app.route("/admin/gpt")
+    @login_required
+    def gpt_page():
+        return render_template("gpt.html")
 
     @app.route(PREFIX + "config")
     @gpt_limit

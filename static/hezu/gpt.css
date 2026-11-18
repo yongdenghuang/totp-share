@@ -1,0 +1,73 @@
+/* GPT 账号（网页版）。配色变量、按钮、卡片、对话框沿用 shell.css 和 app.css */
+.small { font-size: 12.5px; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.warn { color: var(--warn); }
+textarea { font: inherit; color: inherit; }
+.gpt-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.gpt-count { text-align: left; border: 1px solid var(--line); cursor: pointer; font: inherit; color: inherit; }
+.gpt-count.good .k, .gpt-count.good .v { color: var(--good); }
+.gpt-count.bad .k, .gpt-count.bad .v { color: var(--bad); }
+.gpt-count.on { outline: 2px solid var(--accent); }
+.banner.bad { background: var(--bad-bg); color: var(--bad); padding: 10px 14px; border-radius: 12px; margin-bottom: 14px; }
+
+.gpt-plan { display: flex; align-items: center; gap: 14px; padding: 14px 16px; flex-wrap: wrap; }
+.gpt-plan select { border: 1px solid var(--line2); background: var(--panel); border-radius: 9px; padding: 6px 10px; }
+.gpt-switch { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.gpt-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.gpt-switch .track { width: 42px; height: 24px; border-radius: 999px; background: var(--line2); position: relative; transition: background .15s; flex: none; }
+.gpt-switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.gpt-switch input:checked + .track { background: var(--accent); }
+.gpt-switch input:checked + .track::after { left: 21px; }
+.gpt-switch small { display: block; color: var(--text3); font-size: 12px; }
+
+.gpt-list { display: grid; }
+.gpt-row { display: grid; grid-template-columns: minmax(150px, 1.3fr) 120px minmax(90px, 1fr) minmax(90px, 1fr) auto; gap: 16px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); }
+.gpt-who { min-width: 0; display: grid; gap: 2px; }
+.gpt-who b { font-size: 14.5px; }
+.gpt-plan-tag { margin-left: 6px; font-size: 11.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--accent-bg); color: var(--accent); }
+.gpt-email { justify-self: start; border: 0; background: transparent; padding: 0; color: var(--text2); font-size: 12.5px; cursor: copy; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gpt-email:hover { color: var(--accent); }
+.gpt-meta { display: flex; gap: 10px; font-size: 12px; }
+.gpt-iq { display: grid; gap: 6px; justify-items: start; }
+.gpt-badge { display: inline-block; font-size: 12.5px; font-weight: 650; padding: 2px 10px; border-radius: 999px; background: var(--hover); color: var(--text2); }
+.gpt-badge.good { background: var(--good-bg); color: var(--good); }
+.gpt-badge.bad { background: var(--bad-bg); color: var(--bad); }
+.gpt-dots { display: inline-flex; gap: 3px; align-items: center; }
+.gpt-dots i { width: 9px; height: 9px; border-radius: 2px; }
+.gpt-dots i.ok { background: var(--good); }
+.gpt-dots i.no { background: var(--bad); }
+.gpt-bar { display: grid; gap: 4px; min-width: 0; }
+.gpt-bar-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--text2); }
+.gpt-bar-head b { font-variant-numeric: tabular-nums; color: var(--text); }
+.gpt-bar-head b.neg { color: var(--bad); }
+.gpt-track { height: 6px; border-radius: 999px; background: var(--hover); overflow: hidden; }
+.gpt-track i { display: block; height: 100%; border-radius: 999px; }
+.gpt-track i.c5 { background: var(--accent); }
+.gpt-track i.c7 { background: var(--good); }
+.gpt-track i.hi { background: var(--bad); }
+.gpt-bar small { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gpt-actions { display: flex; gap: 6px; }
+
+dialog.dlg.gpt-detail, dialog.dlg.gpt-auth { width: min(640px, calc(100vw - 24px)); }
+.gpt-detail .body, .gpt-auth .body { white-space: normal; max-height: calc(100vh - 170px); overflow-y: auto; }
+.gpt-kv { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; font-size: 13.5px; }
+.gpt-sec { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.gpt-quota { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.gpt-ops { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.gpt-hist { display: grid; }
+.gpt-hrow { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.gpt-auth textarea, .gpt-setup textarea { border: 1px solid var(--line2); border-radius: 9px; padding: 8px 10px; background: var(--panel); font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; resize: vertical; width: 100%; }
+.gpt-setup-body { display: grid; gap: 12px; padding: 4px 16px 16px; max-width: 560px; }
+.gpt-help { white-space: pre-line; line-height: 1.6; }
+.spacer { flex: 1; }
+.vtoast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 16px); background: var(--text); color: var(--bg); padding: 9px 18px; border-radius: 999px; font-size: 13.5px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 50; }
+.vtoast.show { opacity: 1; transform: translate(-50%, 0); }
+
+@media (max-width: 1080px) {
+  .view { padding-left: 12px; padding-right: 12px; }
+  .gpt-row { grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+  .gpt-who { grid-column: 1 / -1; }
+  .gpt-iq { grid-column: 1 / -1; grid-auto-flow: column; justify-content: start; align-items: center; }
+  .gpt-actions { grid-column: 1 / -1; }
+  .gpt-quota { grid-template-columns: 1fr; }
+}

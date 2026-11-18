@@ -126,7 +126,7 @@ def context():
 # 左侧导航：四个大分类，每个分类里的小项都能拖动调整顺序。顺序存在 settings 表（nav_order），
 # 「账号」分类里的表的顺序就是账本里 sheets 的顺序，存在账本里。验证码各页、账本页、密码本页共用。
 NAV_SECTIONS = [("accounts", "账号"), ("backend", "后台"), ("backup", "备份"), ("totp", "验证码")]
-NAV_ITEMS = {"backend": ["cards", "vps"], "backup": ["vault", "notes"], "totp": ["dashboard", "logs", "settings"]}
+NAV_ITEMS = {"backend": ["cards", "vps", "gpt"], "backup": ["vault", "notes"], "totp": ["dashboard", "logs", "settings"]}
 
 
 def _ordered(saved, known):
@@ -183,6 +183,7 @@ def shell_nav():
     items = {
         "cards": {"text": "支付卡", "href": ledger + "#cards", "icon": "card", "count": len(state.get("cards") or [])},
         "vps": {"text": "VPS", "href": ledger + "#vps", "icon": "server", "count": len(state.get("vps") or [])},
+        "gpt": {"text": "GPT 账号", "href": url_for("gpt_page"), "icon": "brain", "on": ["gpt_page"]},
         "vault": {"text": "密码本", "href": url_for("vault_page"), "icon": "lock", "count": vc["items"], "on": ["vault_page"]},
         "notes": {"text": "备忘录", "href": url_for("notes_page"), "icon": "note", "count": vc["notes"], "on": ["notes_page"]},
         "dashboard": {"text": "验证码账号", "href": url_for("dashboard"), "icon": "key", "count": accounts,
