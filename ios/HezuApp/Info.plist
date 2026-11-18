@@ -36,6 +36,41 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>magnifyingglass</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>搜索全部</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>search</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>key.horizontal</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>验证码</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>codes</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>lock</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>密码本</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>vault</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>square.and.pencil</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>新建备忘录</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>newnote</string>
+		</dict>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

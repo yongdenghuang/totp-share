@@ -23,10 +23,51 @@ struct HomeView: View {
     @State private var dest: LedgerRoute = .vps
     @State private var showDest = false
     @State private var showAllDue = false
+    @State private var query = ""
+    @State private var showSearch = false
+    @State private var newNote = false
+    @ObservedObject private var quick = QuickAction.shared
 
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
     var body: some View {
+        Group {
+            if query.trimmingCharacters(in: .whitespaces).isEmpty { dashboard } else { GlobalSearchResults(query: query) }
+        }
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索验证码、密码、备忘录、卡号…")
+        .autocorrectionDisabled()
+        .textInputAutocapitalization(.never)
+        .navigationTitle("合租管理")
+        .task {
+            ledger.api = api; codes.api = api; vault.api = api; notes.api = api
+            if !ledger.loaded { await reloadAll() }
+        }
+        .navigationDestination(isPresented: $showDest) { LedgerDestination(route: dest) }
+        .navigationDestination(isPresented: $showModule) { ModuleView(id: module) }
+        .navigationDestination(isPresented: $showSearch) { GlobalSearchScreen() }
+        .navigationDestination(isPresented: $newNote) { NoteEditor(initial: Note()) }
+        .toolbar { ToolbarItem(placement: .primaryAction) { NavigationLink { LayoutSettingsView() } label: { Image(systemName: "slider.horizontal.3") } } }
+        .onAppear { handleQuick(quick.pending) }
+        .onChange(of: quick.pending) { handleQuick($0) }
+    }
+
+    /// 桌面图标的快捷操作
+    private func handleQuick(_ action: String?) {
+        guard let action else { return }
+        quick.pending = nil
+        tab = "home"
+        showSearch = false; showModule = false; showDest = false; newNote = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            switch action {
+            case "search": showSearch = true
+            case "newnote": newNote = true
+            case "codes", "vault", "notes": open(action)
+            default: break
+            }
+        }
+    }
+
+    private var dashboard: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 profitCard
@@ -42,15 +83,7 @@ struct HomeView: View {
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("合租管理")
         .refreshable { await reloadAll() }
-        .task {
-            ledger.api = api; codes.api = api; vault.api = api; notes.api = api
-            if !ledger.loaded { await reloadAll() }
-        }
-        .navigationDestination(isPresented: $showDest) { LedgerDestination(route: dest) }
-        .navigationDestination(isPresented: $showModule) { ModuleView(id: module) }
-        .toolbar { ToolbarItem(placement: .primaryAction) { NavigationLink { LayoutSettingsView() } label: { Image(systemName: "slider.horizontal.3") } } }
     }
 
     private func reloadAll() async {

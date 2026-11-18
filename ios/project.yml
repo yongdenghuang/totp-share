@@ -36,6 +36,19 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIApplicationShortcutItems:
+          - UIApplicationShortcutItemType: search
+            UIApplicationShortcutItemTitle: 搜索全部
+            UIApplicationShortcutItemIconSymbolName: magnifyingglass
+          - UIApplicationShortcutItemType: codes
+            UIApplicationShortcutItemTitle: 验证码
+            UIApplicationShortcutItemIconSymbolName: key.horizontal
+          - UIApplicationShortcutItemType: vault
+            UIApplicationShortcutItemTitle: 密码本
+            UIApplicationShortcutItemIconSymbolName: lock
+          - UIApplicationShortcutItemType: newnote
+            UIApplicationShortcutItemTitle: 新建备忘录
+            UIApplicationShortcutItemIconSymbolName: square.and.pencil
         NSFaceIDUsageDescription: 用面容 ID 解锁合租管理，防止别人拿到手机就能看到你的账号和密码。
         ITSAppUsesNonExemptEncryption: false
         # 只放行本机地址的 http（在模拟器里连电脑上的测试服务器）；正式地址仍然只能用 https

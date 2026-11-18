@@ -5,6 +5,7 @@ import SwiftUI
 /// 导出的 Excel 等文件用系统分享面板保存、下拉刷新。网页本身的功能和电脑上完全一样。
 @main
 struct HezuApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var settings = AppSettings()
     @StateObject private var lock = AppLock()
 
