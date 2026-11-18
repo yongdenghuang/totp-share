@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 func daysUntil(_ iso: String) -> Int? {
     let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .current
@@ -26,6 +27,7 @@ struct HomeView: View {
     @State private var query = ""
     @State private var showSearch = false
     @State private var newNote = false
+    @State private var dragging: String?
     @ObservedObject private var quick = QuickAction.shared
 
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
@@ -74,9 +76,22 @@ struct HomeView: View {
                 LazyVGrid(columns: cols, spacing: 10) {
                     ForEach(layout.ordered(ledger.moduleIDs).filter { !layout.homeHidden.contains($0) }, id: \.self) { id in
                         let m = moduleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt)
-                        tile(m.title, m.sub, m.icon, m.color) { open(id) }
+                        tile(m.title, m.sub, m.icon, tileColors(id, ledger)) { open(id) }
+                            .opacity(dragging == id ? 0.35 : 1)
+                            .scaleEffect(dragging == id ? 0.94 : 1)
+                            // 长按方块拖到别的位置，松手就记住新顺序
+                            .onDrag {
+                                dragging = id
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                return NSItemProvider(object: id as NSString)
+                            } preview: {
+                                tile(m.title, m.sub, m.icon, tileColors(id, ledger)) {}.frame(width: 120)
+                            }
+                            .onDrop(of: [UTType.text], delegate: TileDrop(target: id, dragging: $dragging, move: moveTile))
                     }
                 }
+                .onDrop(of: [UTType.text], isTargeted: nil) { _ in dragging = nil; return true }
+                Text("长按方块拖动可以调整顺序").font(.caption).foregroundStyle(.tertiary).frame(maxWidth: .infinity).padding(.top, -8)
                 dueSection
                 if let e = ledger.error { ErrorBanner(message: e) { Task { await ledger.load() } } }
             }
@@ -143,19 +158,33 @@ struct HomeView: View {
         }.frame(maxWidth: .infinity)
     }
 
-    private func tile(_ title: String, _ sub: String, _ icon: String, _ color: Color, _ tap: @escaping () -> Void) -> some View {
+    /// 彩色方块：每个模块一种颜色，渐变底、白字
+    private func tile(_ title: String, _ sub: String, _ icon: String, _ colors: [Color], _ tap: @escaping () -> Void) -> some View {
         Button(action: tap) {
             VStack(spacing: 7) {
-                Image(systemName: icon).font(.system(size: 19, weight: .semibold)).foregroundStyle(color)
-                    .frame(width: 42, height: 42).background(color.opacity(0.13), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1).minimumScaleFactor(0.8)
-                Text(sub).font(.caption).foregroundStyle(.secondary)
+                Image(systemName: icon).font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 42, height: 42).background(.white.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.8)
+                Text(sub).font(.caption).foregroundStyle(.white.opacity(0.85))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14).padding(.horizontal, 6)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: colors[0].opacity(0.3), radius: 6, y: 3)
+            .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+
+    private func moveTile(_ from: String, _ to: String) {
+        var o = layout.ordered(ledger.moduleIDs)
+        guard let i = o.firstIndex(of: from), let j = o.firstIndex(of: to), i != j else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            o.move(fromOffsets: IndexSet(integer: i), toOffset: j > i ? j + 1 : j)
+            layout.homeOrder = o
+        }
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 
     private var dueSection: some View {
@@ -251,4 +280,14 @@ struct MoreView: View {
             EmbeddedWeb(path: path).ignoresSafeArea(edges: .bottom).navigationTitle(title).navigationBarTitleDisplayMode(.inline)
         } label: { Label(title, systemImage: icon) }
     }
+}
+
+/// 拖到哪个方块上面，就把拖着的方块挪到那个位置
+struct TileDrop: DropDelegate {
+    let target: String
+    @Binding var dragging: String?
+    let move: (String, String) -> Void
+    func dropEntered(info: DropInfo) { if let d = dragging, d != target { move(d, target) } }
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+    func performDrop(info: DropInfo) -> Bool { dragging = nil; return true }
 }

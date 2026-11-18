@@ -118,9 +118,40 @@ struct LayoutSettingsView: View {
                     var o = layout.ordered(ledger.moduleIDs); o.move(fromOffsets: from, toOffset: to); layout.homeOrder = o
                 }
                 Button("恢复默认顺序，全部显示") { layout.homeOrder = []; layout.homeHidden = [] }
-            } header: { Text("首页方框") } footer: { Text("拖动右边的三条线调整顺序，点眼睛隐藏或显示。") }
+            } header: { Text("首页方框") } footer: { Text("拖动右边的三条线调整顺序（也可以直接在首页长按方块拖动），点眼睛隐藏或显示。") }
         }
         .environment(\.editMode, .constant(.active))
         .navigationTitle("自定义首页和标签")
     }
+}
+
+// MARK: - 首页方块的颜色（五颜六色，每个模块固定一种，挪位置颜色跟着走）
+private func pair(_ a: String, _ b: String) -> [Color] { [Color(hex: a), Color(hex: b)] }
+private let fixedTileColors: [String: [Color]] = [
+    "codes": pair("#14b8a6", "#0d9488"),   // 青绿
+    "vault": pair("#fb923c", "#ea580c"),   // 橙
+    "notes": pair("#facc15", "#eab308"),   // 黄
+    "vps":   pair("#38bdf8", "#2563eb"),   // 蓝
+    "cards": pair("#f472b6", "#db2777"),   // 粉
+    "gpt":   pair("#4ade80", "#16a34a"),   // 绿
+]
+/// 合租表依次用这些颜色
+private let sheetTileColors: [[Color]] = [
+    pair("#a78bfa", "#7c3aed"),  // 紫
+    pair("#f87171", "#dc2626"),  // 红
+    pair("#818cf8", "#4f46e5"),  // 靛
+    pair("#e879f9", "#c026d3"),  // 品红
+    pair("#22d3ee", "#0891b2"),  // 天青
+    pair("#a3e635", "#65a30d"),  // 青柠
+    pair("#fbbf24", "#d97706"),  // 琥珀
+    pair("#fb7185", "#e11d48"),  // 玫红
+    pair("#2dd4bf", "#0f766e"),  // 碧绿
+    pair("#94a3b8", "#475569"),  // 石板灰
+]
+@MainActor
+func tileColors(_ id: String, _ ledger: LedgerStore) -> [Color] {
+    if let c = fixedTileColors[id] { return c }
+    let sid = String(id.dropFirst(6))
+    let i = ledger.sheetInfo.firstIndex { $0.id == sid } ?? 0
+    return sheetTileColors[i % sheetTileColors.count]
 }
