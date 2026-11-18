@@ -1353,7 +1353,7 @@
       return h('div', { class: 'group' },
         h('div', { class: 'issuer-head' },
           cell(it, 'name', { cls: 'name', placeholder: '卡信息名称', label: '卡信息名称' }),
-          cell(it, 'country', { placeholder: '国家 / 地区', list: 'countries', label: '国家或地区' }),
+          cell(it, 'country', { cls: 'country', placeholder: '国家 / 地区', list: 'countries', label: '国家或地区' }),
           h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => menu(e.currentTarget, [{ text: '删除这个卡种', danger: true, run: async () => {
             const used = usageCount(r => r.issuerId === it.id);
             if (await confirmBox('删除卡种', '删除 “' + it.name + '” 和它下面的 ' + own.length + ' 个卡号？' + (used ? '\n有 ' + used + ' 个账号（含历史月份）选了它，删除后这些账号的续费卡会变成空。' : ''), '删除', true)) {
@@ -1361,6 +1361,7 @@
             }
           } }]) }, icon('more'))),
         h('div', { class: 'issuer-meta' }, h('span', null, ymLabel(view.month) + ' 续费 ', h('b', { text: money(st.cost) })), usageLink(h('span', { class: 'usage' }, h('b', { text: String(st.n) }), ' 个账号在用'), { issuerId: it.id }, it.name), h('span', null, h('b', { text: String(own.length) }), ' 个卡号')),
+        own.length ? h('div', { class: 'cardhead', 'aria-hidden': 'true' }, h('span', { text: '卡号' }), h('span', { text: '有效期' }), h('span', { text: 'CVC' }), h('span', { text: '备注' }), h('span', { class: 'r', text: '本月' }), h('span')) : null,
         own.map(c => {
           const s = cs.byCard[c.id] || { n: 0, cost: 0 };
           return h('div', { class: 'cardrow' },
@@ -1368,7 +1369,7 @@
             copyField(c, 'expiry', { mono: true, label: '有效期', placeholder: 'MM/YY', onChange: () => { c.expiry = fmtExpiry(c.expiry); touch(); } }),
             copyField(c, 'cvc', { mono: true, label: ' CVC', placeholder: 'CVC', title: '点一下复制 CVC', display: () => '•••' }),
             cell(c, 'note', { placeholder: '备注', label: '卡备注' }),
-            h('div', { class: 'spend' }, money(s.cost), usageLink(h('small', { class: 'usage', text: s.n + ' 个账号' }), { cardId: c.id }, it.name + ' ' + cardLabel(c))),
+            h('div', { class: 'spend' + (s.cost || s.n ? '' : ' zero') }, money(s.cost), usageLink(h('small', { class: 'usage', text: s.n + ' 个账号' }), { cardId: c.id }, it.name + ' ' + cardLabel(c))),
             h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '删除卡号', title: '删除卡号', onclick: async () => {
               const used = usageCount(r => r.cardId === c.id);
               if (await confirmBox('删除卡号', '删除 ' + it.name + ' 的 ' + cardLabel(c) + '？' + (used ? '\n有 ' + used + ' 个账号（含历史月份）选了它，删除后会变成“不指定卡号”。' : ''), '删除', true)) {

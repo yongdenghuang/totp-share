@@ -3,6 +3,10 @@
 (function () {
   const root = document.getElementById('gpt');
   if (!root) return;
+  const showErr = m => { const b = document.createElement('div'); b.className = 'banner bad'; b.textContent = '页面出错：' + m + '（请截图发给我）'; root.prepend(b); };
+  window.addEventListener('error', e => showErr((e.message || e) + (e.filename ? ' @' + e.filename.split('/').pop() + ':' + e.lineno : '')));
+  window.addEventListener('unhandledrejection', e => showErr(e.reason && e.reason.message || String(e.reason)));
+  root.innerHTML = '<div class="top"><h1>GPT 账号</h1></div><div class="view"><div class="group"><div class="empty">加载中…</div></div></div>';
   let CSRF = root.dataset.csrf;
   const API = '/api/app/gpt/';
 
@@ -83,7 +87,7 @@
       }
       S.error = '';
     } catch (e) { S.error = e.message; }
-    render();
+    try { render(); } catch (e) { showErr(e.message + ' ' + ((e.stack || '').split('\n')[1] || '').trim()); }
   }
 
   // ---------- 页面 ----------
