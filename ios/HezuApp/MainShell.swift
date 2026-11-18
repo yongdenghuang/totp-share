@@ -40,6 +40,7 @@ struct MainTabView: View {
     @StateObject private var notes = NotesStore()
     @StateObject private var ledger = LedgerStore()
     @StateObject private var gpt = GPTStore()
+    @StateObject private var komari = KomariStore()
     @StateObject private var layout = LayoutPrefs()
     @State private var tab = "home"
 
@@ -61,8 +62,9 @@ struct MainTabView: View {
         .environmentObject(notes)
         .environmentObject(ledger)
         .environmentObject(gpt)
+        .environmentObject(komari)
         .environmentObject(layout)
-        .onAppear { codes.api = api; vault.api = api; notes.api = api; ledger.api = api; gpt.api = api }
+        .onAppear { codes.api = api; vault.api = api; notes.api = api; ledger.api = api; gpt.api = api; komari.api = api }
         .onChange(of: layout.tabs) { t in if tab != "home" && tab != "more" && !t.contains(tab) { tab = "home" } }
     }
 

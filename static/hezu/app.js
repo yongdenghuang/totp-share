@@ -1513,13 +1513,108 @@
     draw(false);
     return box;
   }
+  // ---------- Komari 实时监控（服务器转发 Komari 的公开接口，这里每 10 秒刷一次，只更新这一块）----------
+  let KOM = null, komTimer = 0, komBadges = [];
+  const komEl = h('div', { class: 'group kom' });
+  const fmtBytes = b => { b = +b || 0; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; } return (b >= 100 || i === 0 ? b.toFixed(0) : b.toFixed(b >= 10 ? 1 : 2)) + ' ' + u[i]; };
+  const fmtSpeed = b => fmtBytes(b) + '/s';
+  const pct = (a, b) => b > 0 ? Math.min(100, a / b * 100) : 0;
+  const cycleText = c => ({ 30: '月', 31: '月', 90: '季', 92: '季', 180: '半年', 183: '半年', 365: '年', 730: '两年', 1095: '三年' })[c] || (c > 0 ? c + ' 天' : '');
+  const komNorm = t => String(t || '').toLowerCase().replace(/[^a-z0-9一-鿿]/g, '');
+  function komNodeOf(v) {
+    if (!KOM || !KOM.nodes) return null;
+    if (v.komari) return KOM.nodes.find(n => n.uuid === v.komari) || null;
+    const a = komNorm(v.host); if (a.length < 3) return null;
+    const hits = KOM.nodes.filter(n => { const b = komNorm(n.name); return b.length >= 3 && (a === b || a.includes(b) || b.includes(a)); });
+    return hits.length === 1 ? hits[0] : null;   // 名字对不上或者对上好几台，就等手动关联
+  }
+  async function komLoad() {
+    clearTimeout(komTimer);
+    if (view.tab !== 'vps' || document.hidden) { komTimer = setTimeout(komLoad, 10000); return; }
+    try { const r = await fetch('/api/app/komari', { credentials: 'same-origin' }), d = await r.json(); KOM = r.ok ? d : { error: d.error || ('HTTP ' + r.status), nodes: KOM && KOM.nodes }; }
+    catch (e) { KOM = { error: '连不上服务器', nodes: KOM && KOM.nodes }; }
+    if (!komEl.contains(document.activeElement)) komPaint();   // 正在填地址时不重画，免得把输入清掉
+    if (KOM.configured !== false) komTimer = setTimeout(komLoad, 10000);
+  }
+  function meter(label, p, main, sub, warnAt) {
+    return h('div', { class: 'km' }, h('div', { class: 'km-top' }, h('span', { text: label }), h('b', { text: main })),
+      h('div', { class: 'km-bar' }, h('i', { class: p >= (warnAt || 90) ? 'bad' : p >= (warnAt || 90) - 20 ? 'warn' : '', style: 'width:' + p.toFixed(1) + '%' })),
+      h('div', { class: 'km-sub', text: sub }));
+  }
+  function komCard(n) {
+    const up = n.online ? Math.floor(n.uptime / 86400) : null, exp = n.expiredAt && !n.expiredAt.startsWith('0001') ? daysUntil(n.expiredAt.slice(0, 10)) : null;
+    const linked = S.vps.find(v => komNodeOf(v) === n);
+    const ping = n.ping;
+    return tinted(h('div', { class: 'kcard' + (n.online ? '' : ' off') },
+      h('div', { class: 'kc-head' }, h('span', { class: 'kdot' + (n.online ? ' on' : '') }), h('b', { class: 'kc-name', text: n.name, title: n.os + (n.cpuName ? '\n' + n.cpuName + ' · ' + n.cores + ' 核' : '') }), h('span', { text: n.region })),
+      h('div', { class: 'kc-meta' }, h('span', { text: n.online ? '在线 ' + up + ' 天' : '离线' }),
+        exp != null ? h('span', { class: exp < 0 ? 'neg' : exp <= VPS_DUE_DAYS ? 'warn' : '', text: relText(exp) + '到期' }) : null,
+        n.price ? h('span', { class: 'kc-price', text: n.currency + n.price + (cycleText(n.billingCycle) ? ' / ' + cycleText(n.billingCycle) : '') }) : null),
+      h('div', { class: 'kc-grid' },
+        meter('CPU', n.cpu, n.cpu.toFixed(1) + '%', n.load.map(x => x.toFixed(2)).join(', ')),
+        meter('内存', pct(n.ram, n.ramTotal), pct(n.ram, n.ramTotal).toFixed(1) + '%', fmtBytes(n.ram) + ' / ' + fmtBytes(n.ramTotal)),
+        meter('硬盘', pct(n.disk, n.diskTotal), pct(n.disk, n.diskTotal).toFixed(1) + '%', fmtBytes(n.disk) + ' / ' + fmtBytes(n.diskTotal)),
+        n.trafficLimit ? meter('流量', pct(n.trafficUsed, n.trafficLimit), pct(n.trafficUsed, n.trafficLimit).toFixed(1) + '%', fmtBytes(n.trafficUsed) + ' / ' + fmtBytes(n.trafficLimit), 80)
+          : meter('流量', 0, fmtBytes(n.totalUp + n.totalDown), '没设上限')),
+      h('div', { class: 'kc-foot' },
+        h('span', { class: 'kup', text: '↑ ' + fmtSpeed(n.netOut) }), h('span', { class: 'kdown', text: '↓ ' + fmtSpeed(n.netIn) }),
+        h('span', { class: 'faint', text: '共 ↑' + fmtBytes(n.totalUp) + ' ↓' + fmtBytes(n.totalDown) })),
+      ping ? h('div', { class: 'kc-foot' }, h('span', { text: (ping.name || '延迟') + ' ' + Math.round(ping.latest) + ' ms' }),
+        h('span', { class: ping.loss >= 10 ? 'neg' : ping.loss >= 3 ? 'warn' : 'pos', text: '丢包 ' + ping.loss.toFixed(1) + '%' })) : null,
+      linked ? h('div', { class: 'kc-link', text: '对应表格里的 ' + (linked.host || '未命名') }) : null),
+      !n.online ? '#8891a5' : n.cpu >= 90 || (ping && ping.loss >= 10) ? '#d32f4c' : '#0d9488');
+  }
+  function komSetup() {
+    const inp = h('input', { class: 'inp', type: 'url', placeholder: 'https://k.example.com', value: (KOM && KOM.url) || '' });
+    const msg = h('span', { class: 'faint' });
+    const save = async () => {
+      msg.textContent = '正在连接…';
+      const r = await fetch('/api/app/komari/config', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF }, body: JSON.stringify({ url: inp.value }) }), d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) { KOM = d; komPaint(); render(); } else msg.textContent = d.error || ('保存失败（HTTP ' + r.status + '）');
+    };
+    return h('div', { class: 'kom-setup' }, h('span', { text: 'Komari 网址' }), inp, h('button', { class: 'btn small primary', type: 'button', text: '连接', onclick: save }), msg,
+      h('div', { class: 'faint', text: '只用 Komari 首页公开的数据，不需要账号密码。' }));
+  }
+  function komPaint() {
+    for (const b of komBadges) {
+      const n = komNodeOf(b.v);
+      setKids(b.el, n ? [h('span', { class: 'kdot' + (n.online ? ' on' : '') }), n.online ? 'CPU ' + n.cpu.toFixed(0) + '% · 内存 ' + pct(n.ram, n.ramTotal).toFixed(0) + '%' : '离线'] : []);
+      b.el.title = n ? 'Komari：' + n.name + (n.ping ? ' · 延迟 ' + Math.round(n.ping.latest) + ' ms' : '') : '';
+    }
+    if (!KOM) { setKids(komEl, h('div', { class: 'empty', text: '正在读取 Komari 监控…' })); return; }
+    if (KOM.configured === false) {
+      setKids(komEl, h('div', { class: 'group-head' }, h('span', { class: 'group-title', text: '实时监控' }), h('span', { class: 'group-sum', text: '接入 Komari 探针后，这里显示每台机器的 CPU、内存、硬盘、流量、网速和延迟' })), komSetup());
+      return;
+    }
+    const nodes = KOM.nodes || [], on = nodes.filter(n => n.online);
+    const speedUp = nodes.reduce((a, n) => a + n.netOut, 0), speedDown = nodes.reduce((a, n) => a + n.netIn, 0);
+    const total = nodes.reduce((a, n) => a + n.totalUp + n.totalDown, 0);
+    let showSetup = false;
+    const head = h('div', { class: 'group-head' }, h('span', { class: 'group-title', text: '实时监控' }),
+      h('span', { class: 'pill ' + (on.length === nodes.length ? 'pos' : 'warn'), text: on.length + ' / ' + nodes.length + ' 在线' }),
+      h('span', { class: 'group-sum' }, h('span', null, '网速 ', h('b', { class: 'kup', text: '↑ ' + fmtSpeed(speedUp) }), ' ', h('b', { class: 'kdown', text: '↓ ' + fmtSpeed(speedDown) })),
+        h('span', null, '累计流量 ', h('b', { text: fmtBytes(total) })),
+        KOM.error ? h('span', { class: 'neg', text: KOM.error }) : null,
+        h('a', { href: KOM.url, target: '_blank', rel: 'noopener', text: '打开 Komari' }),
+        h('button', { class: 'btn ghost small', type: 'button', text: '换地址', onclick: () => { showSetup = !showSetup; setup.hidden = !showSetup; } })));
+    const setup = komSetup(); setup.hidden = true;
+    setKids(komEl, head, setup, nodes.length ? h('div', { class: 'kgrid' }, nodes.map(komCard)) : h('div', { class: 'empty', text: 'Komari 里还没有公开的节点。' }));
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && view.tab === 'vps') komLoad(); });
+  function komLinkMenu(btn, v) {
+    const nodes = (KOM && KOM.nodes) || [];
+    if (!nodes.length) return alertBox(KOM && KOM.configured === false ? '先在上面「实时监控」里填 Komari 网址。' : 'Komari 里还没有节点。');
+    menu(btn, [{ text: (v.komari ? '' : '✓ ') + '按名字自动匹配', run: () => { delete v.komari; touch(); render(); } }, '-']
+      .concat(nodes.map(n => ({ text: (v.komari === n.uuid ? '✓ ' : '') + n.name + (n.region ? ' ' + n.region : ''), run: () => { v.komari = n.uuid; touch(); render(); } }))));
+  }
   function vpsMenu(btn, v) {
     const addr = v.ip ? v.ip + (v.port ? ':' + v.port : '') : '';
     menu(btn, [
       addr ? { text: '复制 ' + addr, run: () => copyQuiet(addr) } : null,
       v.ip ? { text: '复制 SSH 登录命令', run: () => copyQuiet('ssh ' + (v.port ? '-p ' + v.port + ' ' : '') + 'root@' + v.ip) } : null,
       v.site ? { text: '打开官网', run: () => window.open(fixUrl(v.site), '_blank', 'noopener') } : null,
-      addr || v.site ? '-' : null,
+      { text: '关联 Komari 监控节点…', run: () => komLinkMenu(btn, v) },
+      '-',
       { text: '删除这台 VPS', danger: true, run: async () => {
         if (await confirmBox('删除 VPS', '删除 “' + (v.host || '未命名') + '”？', '删除', true)) { S.vps.splice(S.vps.indexOf(v), 1); touch(); render(); }
       } },
@@ -1545,6 +1640,8 @@
   }
   function vpsView() {
     ensureRates();
+    komBadges = [];
+    if (!KOM) komLoad(); else if (KOM.configured !== false) { clearTimeout(komTimer); komTimer = setTimeout(komLoad, 10000); }
     const cols = [['主机', 0], ['官网', 86], ['IP', 152], ['端口', 64], ['密码', 104], ['部署', 236], ['流量及重置', 88], ['续费', 150], ['价格', 112], ['邮箱', 196], ['登录密码', 104], ['', 40]];
     const body = S.vps.map(v => {
       const cnyEl = h('div', { class: 'cny' });
@@ -1552,7 +1649,7 @@
       const d = daysUntil(v.renew);
       return tinted(h('tr', { class: d == null ? '' : d < 0 ? 'overdue' : d <= VPS_DUE_DAYS ? 'due-soon' : '' },
         h('td', null, h('div', { class: 'hostcell' }, h('span', { class: 'avatar ' + hashColor(v.host || '?'), text: (Array.from(v.host || '?')[0] || '?').toUpperCase(), 'aria-hidden': 'true' }),
-          cell(v, 'host', { cls: 'strong', label: '主机', placeholder: '主机名', title: v.host }))),
+          h('div', { class: 'hoststack' }, cell(v, 'host', { cls: 'strong', label: '主机', placeholder: '主机名', title: v.host }), (() => { const el = h('div', { class: 'kbadge' }); komBadges.push({ v, el }); return el; })()))),
         h('td', null, siteField(v)),
         h('td', null, copyField(v, 'ip', { mono: true, label: ' IP', placeholder: 'IP' })),
         h('td', null, cell(v, 'port', { cls: 'mono', label: '端口', placeholder: '端口' })),
@@ -1565,8 +1662,9 @@
         h('td', null, copyField(v, 'loginPassword', { mask: true, label: '登录密码', placeholder: '登录密码' })),
         h('td', null, h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => vpsMenu(e.currentTarget, v) }, icon('more')))), vpsTint(v, d));
     });
-    return [
+    const out = [
       vpsTiles(),
+      komEl,
       h('div', { class: 'group vps' },
         h('div', { class: 'group-head' }, h('span', { class: 'group-title', text: '全部主机' }), h('span', { class: 'pill', text: S.vps.length + ' 台' }),
           h('span', { class: 'group-sum' }, h('span', { class: 'due-key' }), '30 天内要续费 · 点 IP、密码复制 · 部署项目回车添加')),
@@ -1575,6 +1673,8 @@
           h('thead', null, h('tr', null, cols.map(c => h('th', { class: c[0] === '价格' ? 'r' : '', text: c[0] })))), h('tbody', null, body))) : h('div', { class: 'empty', text: '还没有 VPS。' }),
         h('div', { class: 'group-foot' }, h('button', { class: 'btn ghost small', type: 'button', onclick: () => { S.vps.push(newVps()); touch(); render(); const ins = document.querySelectorAll('.vps tbody tr:last-child input'); if (ins[0]) ins[0].focus(); } }, icon('plus', 15), '添加 VPS'))),
     ];
+    komPaint();
+    return out;
   }
 
   // ---------- 总览 ----------

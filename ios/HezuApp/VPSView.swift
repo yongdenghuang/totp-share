@@ -7,10 +7,35 @@ struct VPSView: View {
     @EnvironmentObject var toast: Toast
     @State private var editing: JSON?
     @State private var deleting: JSON?
+    @EnvironmentObject var komari: KomariStore
+    @AppStorage("vps_page") private var page = "hosts"
 
     var body: some View {
         List {
             Section { header }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+            Section {
+                Picker("", selection: $page) { Text("主机").tag("hosts"); Text("实时监控").tag("monitor") }
+                    .pickerStyle(.segmented).padding(.horizontal, 16)
+            }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+            if page == "monitor" { KomariSection() } else { hostsSection }
+            if let e = ledger.error { ErrorBanner(message: e) { Task { await ledger.load() } } }
+        }
+        .listStyle(.insetGrouped)
+        .moduleBackground(Theme.vps)
+        .navigationTitle("VPS")
+        .refreshable { await ledger.load(); await komari.load() }
+        .task {
+            // 停在这一页时每 10 秒刷新一次监控数据
+            while !Task.isCancelled {
+                await komari.load()
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+            }
+        }
+        .modifier(VPSSheets(editing: $editing, deleting: $deleting))
+        .task { ledger.api = api; if !ledger.loaded { await ledger.load() }; await ledger.loadRates() }
+    }
+
+    @ViewBuilder private var hostsSection: some View {
             Section {
                 ForEach(sorted, id: \.idKey) { v in
                     NavigationLink { VPSDetail(id: v.str("id")) } label: { VPSRow(v: v) }
@@ -31,12 +56,18 @@ struct VPSView: View {
                         .tintedRow(vpsTint(v))
                 }
             } footer: { Text("左滑删除，右滑复制 IP、密码；30 天内要续费的会标出来。") }
-            if let e = ledger.error { ErrorBanner(message: e) { Task { await ledger.load() } } }
-        }
-        .listStyle(.insetGrouped)
-        .moduleBackground(Theme.vps)
-        .navigationTitle("VPS")
-        .refreshable { await ledger.load() }
+    }
+
+}
+
+/// 新建 / 编辑 / 删除 VPS 的弹窗
+private struct VPSSheets: ViewModifier {
+    @Binding var editing: JSON?
+    @Binding var deleting: JSON?
+    @EnvironmentObject var ledger: LedgerStore
+    @EnvironmentObject var toast: Toast
+    func body(content: Content) -> some View {
+        content
         .toolbar { ToolbarItem(placement: .primaryAction) { Button { editing = newVps() } label: { Image(systemName: "plus") } } }
         .sheet(item: Binding(get: { editing.map(VPSRef.init) }, set: { if $0 == nil { editing = nil } })) { ref in VPSEditor(original: ref.v) }
         .confirmationDialog("删除「\(deleting?.str("host") ?? "")」？", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
@@ -44,14 +75,15 @@ struct VPSView: View {
                 if let id = deleting?.str("id") { ledger.edit { s in s.editList("vps") { $0.removeAll { $0.str("id") == id } } }; toast.show("已删除") }
             }
         } message: { Text("这台 VPS 的全部信息会删除，不能恢复。") }
-        .task { ledger.api = api; if !ledger.loaded { await ledger.load() }; await ledger.loadRates() }
     }
+}
 
-    private var sorted: [JSON] {
+extension VPSView {
+    var sorted: [JSON] {
         ledger.vps.sorted { a, b in (daysUntil(a.str("renew")) ?? 99999) < (daysUntil(b.str("renew")) ?? 99999) }
     }
 
-    private var header: some View {
+    var header: some View {
         let priced = ledger.vps.compactMap { Calc.priceUsd($0.str("price")) }
         let usd = priced.reduce(0, +)
         let soon = ledger.vps.filter { (daysUntil($0.str("renew")) ?? 999) <= 30 }.count
@@ -61,7 +93,7 @@ struct VPSView: View {
         }.padding(.horizontal, 16).padding(.top, 4)
     }
 
-    private func box(_ k: String, _ v: String, _ sub: String) -> some View {
+    func box(_ k: String, _ v: String, _ sub: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(k).font(.caption).foregroundStyle(.secondary)
             Text(v).font(.system(.title3, design: .rounded).weight(.bold)).lineLimit(1).minimumScaleFactor(0.6)
@@ -83,6 +115,7 @@ func vpsTint(_ v: JSON) -> Color {
 struct VPSRow: View {
     let v: JSON
     @EnvironmentObject var ledger: LedgerStore
+    @EnvironmentObject var komari: KomariStore
     var body: some View {
         HStack(spacing: 12) {
             let host = v.str("host").isEmpty ? "?" : v.str("host")
@@ -93,6 +126,7 @@ struct VPSRow: View {
                 Text([v.str("ip"), v.str("port").isEmpty ? "" : ":" + v.str("port")].joined()).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                 let tags = v.list("tags").map { $0.str("name") }.filter { !$0.isEmpty }
                 if !tags.isEmpty { Text(tags.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                if let n = komari.node(for: v) { KomariBadge(n: n) }
             }
             Spacer(minLength: 6)
             VStack(alignment: .trailing, spacing: 3) {
@@ -117,11 +151,22 @@ struct VPSDetail: View {
     @Environment(\.openURL) private var openURL
     @State private var showPw = false
     @State private var editing = false
+    @EnvironmentObject var komari: KomariStore
 
     private var v: JSON { ledger.vps.first { $0.str("id") == id } ?? [:] }
 
     var body: some View {
         List {
+            if komari.configured == true {
+                let n = komari.node(for: v)
+                Section {
+                    if let n { KomariCard(n: n).tintedRow(komariTint(n)) }
+                    Picker("关联节点", selection: Binding(get: { v.str("komari") }, set: { setKomari($0) })) {
+                        Text(n != nil && v.str("komari").isEmpty ? "按名字自动（\(n!.str("name"))）" : "按名字自动匹配").tag("")
+                        ForEach(komari.nodes.indices, id: \.self) { i in Text(komari.nodes[i].str("name") + " " + komari.nodes[i].str("region")).tag(komari.nodes[i].str("uuid")) }
+                    }
+                } header: { Text("实时监控") } footer: { if n == nil { Text("名字对不上 Komari 里的节点，在上面选一台关联。") } }
+            }
             Section {
                 row("IP", v.str("ip"), mono: true)
                 row("端口", v.str("port"), mono: true)
@@ -156,6 +201,10 @@ struct VPSDetail: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .primaryAction) { Button("编辑") { editing = true }.tint(.brand) } }
         .sheet(isPresented: $editing) { VPSEditor(original: v) }
+    }
+
+    private func setKomari(_ uuid: String) {
+        ledger.edit { s in s.editList("vps") { l in if let i = l.firstIndex(where: { $0.str("id") == id }) { if uuid.isEmpty { l[i].removeValue(forKey: "komari") } else { l[i]["komari"] = uuid } } } }
     }
 
     private func url(_ s: String) -> URL? {
