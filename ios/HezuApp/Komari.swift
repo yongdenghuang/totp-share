@@ -9,17 +9,32 @@ final class KomariStore: ObservableObject {
     @Published var configured: Bool?
     @Published var url = ""
     @Published var error: String?
+    @Published var sync: JSON = [:]
 
     func load() async {
         do {
             let d = try await api.get("/api/app/komari")
             configured = d.bool("configured"); url = d.str("url"); nodes = d.list("nodes"); error = nil
+            sync = d.dict("sync")
         } catch { self.error = error.localizedDescription }
     }
 
     func save(url: String) async throws {
         let d = try await api.post("/api/app/komari/config", ["url": url])
         configured = d.bool("configured"); self.url = d.str("url"); nodes = d.list("nodes"); error = nil
+    }
+
+    /// 立即双向同步一次，返回做了什么
+    func syncNow() async throws -> [String] {
+        let d = try await api.post("/api/app/komari/sync")
+        sync = d.dict("sync")
+        await load()
+        return (d["actions"] as? [String]) ?? []
+    }
+
+    /// 这台节点的探针安装命令
+    func installCommand(_ uuid: String) async throws -> String {
+        try await api.get("/api/app/komari/install/\(uuid)").str("command")
     }
 
     /// 这台 VPS 对应的节点：手动关联的优先，否则名字一样（或互相包含）且只对上一台
@@ -36,6 +51,11 @@ final class KomariStore: ObservableObject {
 }
 
 // MARK: 格式化
+func agoText(_ t: Int) -> String {
+    guard t > 0 else { return "还没同步过" }
+    let m = Int(Date().timeIntervalSince1970) - t
+    return m < 60 ? "刚刚" : m < 3600 ? "\(m / 60) 分钟前" : "\(m / 3600) 小时前"
+}
 func fmtBytes(_ b: Double) -> String {
     var v = max(0, b); let u = ["B", "KB", "MB", "GB", "TB"]; var i = 0
     while v >= 1024 && i < u.count - 1 { v /= 1024; i += 1 }
@@ -144,6 +164,8 @@ struct KomariSection: View {
     @EnvironmentObject var toast: Toast
     @State private var url = ""
     @State private var saving = false
+    @State private var syncing = false
+    @EnvironmentObject var ledger: LedgerStore
 
     var body: some View {
         if komari.configured == false {
@@ -172,6 +194,22 @@ struct KomariSection: View {
                 }
                 .tintedRow(Theme.vps, bar: false)
                 if let e = komari.error { Text(e).font(.caption).foregroundStyle(Color.bad) }
+                if komari.sync.bool("enabled") {
+                    HStack {
+                        let err = komari.sync.str("error")
+                        Label(err.isEmpty ? "双向同步 · " + agoText(komari.sync.int("last")) : err, systemImage: err.isEmpty ? "arrow.left.arrow.right" : "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(err.isEmpty ? Color.good : Color.bad).lineLimit(3)
+                        Spacer()
+                        Button(syncing ? "同步中…" : "立即同步") {
+                            syncing = true
+                            Task {
+                                do { let a = try await komari.syncNow(); toast.show(a.isEmpty ? "两边已经一致" : a.joined(separator: "\n")); await ledger.load() }
+                                catch { toast.show(error.localizedDescription) }
+                                syncing = false
+                            }
+                        }.font(.caption.weight(.semibold)).buttonStyle(.borderless).disabled(syncing)
+                    }
+                }
             } footer: { if let u = URL(string: komari.url), !komari.url.isEmpty { Link("打开 Komari：" + (u.host ?? komari.url), destination: u).font(.caption) } }
             Section {
                 ForEach(ns.indices, id: \.self) { i in KomariCard(n: ns[i]).tintedRow(komariTint(ns[i])) }

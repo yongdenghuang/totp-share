@@ -395,3 +395,4 @@ table.grid.unitsheet .cell.strong { font-size: 14.5px; }
 .kbadge { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text3); padding-left: 6px; white-space: nowrap; overflow: hidden; }
 .kbadge:empty { display: none; }
 @media (max-width: 720px) { .kgrid { grid-template-columns: 1fr; padding: 10px; } }
+.ksync { display: inline-flex; align-items: center; gap: 6px; }

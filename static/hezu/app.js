@@ -1514,7 +1514,7 @@
     return box;
   }
   // ---------- Komari 实时监控（服务器转发 Komari 的公开接口，这里每 10 秒刷一次，只更新这一块）----------
-  let KOM = null, komTimer = 0, komBadges = [];
+  let KOM = null, komTimer = 0, komBadges = [], komSeen = 0;
   const komEl = h('div', { class: 'group kom' });
   const fmtBytes = b => { b = +b || 0; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; } return (b >= 100 || i === 0 ? b.toFixed(0) : b.toFixed(b >= 10 ? 1 : 2)) + ' ' + u[i]; };
   const fmtSpeed = b => fmtBytes(b) + '/s';
@@ -1534,6 +1534,8 @@
     try { const r = await fetch('/api/app/komari', { credentials: 'same-origin' }), d = await r.json(); KOM = r.ok ? d : { error: d.error || ('HTTP ' + r.status), nodes: KOM && KOM.nodes }; }
     catch (e) { KOM = { error: '连不上服务器', nodes: KOM && KOM.nodes }; }
     if (!komEl.contains(document.activeElement)) komPaint();   // 正在填地址时不重画，免得把输入清掉
+    // 后台同步改了账本（Komari 那边加 / 删 / 改名了机器）：没有正在编辑的改动就拉一下新版本
+    if (KOM.sync && KOM.sync.last && KOM.sync.last !== komSeen) { if (komSeen && !dirty && !saving) pullLatest('komari'); komSeen = KOM.sync.last; }
     if (KOM.configured !== false) komTimer = setTimeout(komLoad, 10000);
   }
   function meter(label, p, main, sub, warnAt) {
@@ -1575,6 +1577,29 @@
     return h('div', { class: 'kom-setup' }, h('span', { text: 'Komari 网址' }), inp, h('button', { class: 'btn small primary', type: 'button', text: '连接', onclick: save }), msg,
       h('div', { class: 'faint', text: '只用 Komari 首页公开的数据，不需要账号密码。' }));
   }
+  function komSyncEl() {
+    const y = KOM && KOM.sync;
+    if (!y || !y.enabled) return h('span', { class: 'faint', text: '双向同步未开启' });
+    const ago = y.last ? Math.max(0, Math.round((Date.now() / 1000 - y.last) / 60)) : null;
+    const tip = (y.log || []).map(x => new Date(x.t * 1000).toLocaleString('zh-CN', { hour12: false }) + '  ' + x.a).join('\n') || '还没有同步过任何变化';
+    const btn = h('button', { class: 'btn ghost small', type: 'button', text: '立即同步', title: tip, onclick: async () => {
+      btn.disabled = true; btn.textContent = '同步中…';
+      try {
+        const r = await fetch('/api/app/komari/sync', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRFToken': CSRF } }), d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) await alertBox(d.error || ('同步失败（HTTP ' + r.status + '）'));
+        else { if (d.actions.length) await alertBox('同步完成：\n' + d.actions.join('\n')); await pullLatest('komari'); }
+      } finally { komLoad(); }
+    } });
+    return h('span', { class: 'ksync', title: tip }, h('span', { class: y.error ? 'neg' : 'pos', text: y.error ? '⚠ ' + y.error : '⇄ 双向同步' + (ago == null ? '' : ' · ' + (ago < 1 ? '刚刚' : ago + ' 分钟前')) }), btn);
+  }
+  async function copyInstall(v) {
+    const n = komNodeOf(v);
+    if (!n) return alertBox('这台还没关联 Komari 节点。');
+    const r = await fetch('/api/app/komari/install/' + encodeURIComponent(n.uuid), { credentials: 'same-origin' }), d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) return alertBox(d.error || ('取不到安装命令（HTTP ' + r.status + '）'));
+    await copyQuiet(d.command);
+    alertBox('已复制 ' + (v.host || '这台') + ' 的探针安装命令。\n用 root 登录这台 VPS，粘贴运行，装好后几秒内就有监控数据。');
+  }
   function komPaint() {
     for (const b of komBadges) {
       const n = komNodeOf(b.v);
@@ -1595,6 +1620,7 @@
       h('span', { class: 'group-sum' }, h('span', null, '网速 ', h('b', { class: 'kup', text: '↑ ' + fmtSpeed(speedUp) }), ' ', h('b', { class: 'kdown', text: '↓ ' + fmtSpeed(speedDown) })),
         h('span', null, '累计流量 ', h('b', { text: fmtBytes(total) })),
         KOM.error ? h('span', { class: 'neg', text: KOM.error }) : null,
+        komSyncEl(),
         h('a', { href: KOM.url, target: '_blank', rel: 'noopener', text: '打开 Komari' }),
         h('button', { class: 'btn ghost small', type: 'button', text: '换地址', onclick: () => { showSetup = !showSetup; setup.hidden = !showSetup; } })));
     const setup = komSetup(); setup.hidden = true;
@@ -1614,6 +1640,7 @@
       v.ip ? { text: '复制 SSH 登录命令', run: () => copyQuiet('ssh ' + (v.port ? '-p ' + v.port + ' ' : '') + 'root@' + v.ip) } : null,
       v.site ? { text: '打开官网', run: () => window.open(fixUrl(v.site), '_blank', 'noopener') } : null,
       { text: '关联 Komari 监控节点…', run: () => komLinkMenu(btn, v) },
+      komNodeOf(v) ? { text: '复制 Komari 探针安装命令', run: () => copyInstall(v) } : null,
       '-',
       { text: '删除这台 VPS', danger: true, run: async () => {
         if (await confirmBox('删除 VPS', '删除 “' + (v.host || '未命名') + '”？', '删除', true)) { S.vps.splice(S.vps.indexOf(v), 1); touch(); render(); }

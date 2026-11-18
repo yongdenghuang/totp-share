@@ -160,7 +160,12 @@ struct VPSDetail: View {
             if komari.configured == true {
                 let n = komari.node(for: v)
                 Section {
-                    if let n { KomariCard(n: n).tintedRow(komariTint(n)) }
+                    if let n {
+                        KomariCard(n: n).tintedRow(komariTint(n))
+                        Button {
+                            Task { do { toast.copy(try await komari.installCommand(n.str("uuid")), "已复制探针安装命令，用 root 在这台 VPS 上运行") } catch { toast.show(error.localizedDescription) } }
+                        } label: { Label("复制探针安装命令", systemImage: "terminal") }
+                    }
                     Picker("关联节点", selection: Binding(get: { v.str("komari") }, set: { setKomari($0) })) {
                         Text(n != nil && v.str("komari").isEmpty ? "按名字自动（\(n!.str("name"))）" : "按名字自动匹配").tag("")
                         ForEach(komari.nodes.indices, id: \.self) { i in Text(komari.nodes[i].str("name") + " " + komari.nodes[i].str("region")).tag(komari.nodes[i].str("uuid")) }
