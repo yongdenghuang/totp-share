@@ -10,12 +10,16 @@ func daysUntil(_ iso: String) -> Int? {
 func relText(_ d: Int) -> String { d < 0 ? "过期 \(-d) 天" : d == 0 ? "今天" : d == 1 ? "明天" : "\(d) 天后" }
 
 struct HomeView: View {
-    @Binding var tab: MainTabView.Tab
+    @Binding var tab: String
     @EnvironmentObject var api: API
     @EnvironmentObject var ledger: LedgerStore
     @EnvironmentObject var codes: CodesStore
     @EnvironmentObject var vault: VaultStore
     @EnvironmentObject var notes: NotesStore
+    @EnvironmentObject var gpt: GPTStore
+    @EnvironmentObject var layout: LayoutPrefs
+    @State private var module = ""
+    @State private var showModule = false
     @State private var dest: LedgerRoute = .vps
     @State private var showDest = false
     @State private var showAllDue = false
@@ -27,16 +31,10 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 18) {
                 profitCard
                 LazyVGrid(columns: cols, spacing: 10) {
-                    ForEach(ledger.sheetInfo) { s in
-                        tile(s.name, s.mode == "resale" ? "\(s.rows) 个项目" : "\(s.rows) 个号", s.grouped ? "person.2.fill" : s.mode == "resale" ? "bolt.fill" : "play.rectangle.fill", Color(red: 0.43, green: 0.36, blue: 0.96)) {
-                            go(.sheet(s.id))
-                        }
+                    ForEach(layout.ordered(ledger.moduleIDs).filter { !layout.homeHidden.contains($0) }, id: \.self) { id in
+                        let m = moduleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt)
+                        tile(m.title, m.sub, m.icon, m.color) { open(id) }
                     }
-                    tile("验证码", "\(codes.accounts.count) 个", "key.horizontal.fill", Color(red: 0.05, green: 0.58, blue: 0.53)) { tab = .codes }
-                    tile("密码本", "\(vault.items.count) 条", "lock.fill", Color(red: 0.86, green: 0.36, blue: 0.19)) { tab = .vault }
-                    tile("备忘录", "\(notes.notes.count) 条", "note.text", Color(red: 0.85, green: 0.6, blue: 0.1)) { tab = .notes }
-                    tile("VPS", "\(ledger.vps.count) 台", "server.rack", Color(red: 0.15, green: 0.45, blue: 0.85)) { go(.vps) }
-                    tile("支付卡", "\(ledger.cards.count) 张", "creditcard.fill", Color(red: 0.4, green: 0.42, blue: 0.47)) { go(.cards) }
                 }
                 dueSection
                 if let e = ledger.error { ErrorBanner(message: e) { Task { await ledger.load() } } }
@@ -51,6 +49,8 @@ struct HomeView: View {
             if !ledger.loaded { await reloadAll() }
         }
         .navigationDestination(isPresented: $showDest) { LedgerDestination(route: dest) }
+        .navigationDestination(isPresented: $showModule) { ModuleView(id: module) }
+        .toolbar { ToolbarItem(placement: .primaryAction) { NavigationLink { LayoutSettingsView() } label: { Image(systemName: "slider.horizontal.3") } } }
     }
 
     private func reloadAll() async {
@@ -62,7 +62,17 @@ struct HomeView: View {
     }
 
     private var total: Calc.Stats { ledger.monthTotal }
-    private func go(_ r: LedgerRoute) { dest = r; showDest = true }
+    private func go(_ r: LedgerRoute) {
+        switch r {
+        case .sheet(let id): open("sheet:" + id)
+        case .cards: open("cards")
+        case .vps: open("vps")
+        }
+    }
+    /// 底部标签里有这个模块就切过去，没有就在首页里点进去
+    private func open(_ id: String) {
+        if layout.tabs.contains(id) { tab = id } else { module = id; showModule = true }
+    }
 
     private var profitCard: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -187,6 +197,7 @@ struct MoreView: View {
                 NavigationLink { SettingsView() } label: { Label("设置", systemImage: "gearshape") }
             }
             Section {
+                NavigationLink { LayoutSettingsView() } label: { Label("自定义首页和底部标签", systemImage: "square.grid.3x3.square") }
                 Button { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } } label: {
                     Label("App 设置（服务器地址、面容 ID）", systemImage: "iphone")
                 }

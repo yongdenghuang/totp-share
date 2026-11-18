@@ -75,10 +75,9 @@ struct NotesView: View {
     @EnvironmentObject var store: NotesStore
     @EnvironmentObject var toast: Toast
     @State private var query = ""
-    @State private var path: [NoteRoute] = []
+    @State private var creating = false
 
     var body: some View {
-        NavigationStack(path: $path) {
             List {
                 let list = filtered
                 let pinned = list.filter(\.pinned), rest = list.filter { !$0.pinned }
@@ -100,7 +99,8 @@ struct NotesView: View {
             .navigationTitle("备忘录")
             .searchable(text: $query, prompt: "搜索")
             .refreshable { await store.load() }
-            .toolbar { ToolbarItem(placement: .primaryAction) { Button { path.append(.new) } label: { Image(systemName: "square.and.pencil") } } }
+            .toolbar { ToolbarItem(placement: .primaryAction) { Button { creating = true } label: { Image(systemName: "square.and.pencil") } } }
+            .navigationDestination(isPresented: $creating) { NoteEditor(initial: Note()) }
             .navigationDestination(for: NoteRoute.self) { r in
                 switch r {
                 case .new: NoteEditor(initial: Note())
@@ -108,7 +108,6 @@ struct NotesView: View {
                 }
             }
             .task { store.api = api; if !store.loaded { await store.load() } }
-        }
     }
 
     private var filtered: [Note] {

@@ -39,28 +39,33 @@ struct MainTabView: View {
     @StateObject private var vault = VaultStore()
     @StateObject private var notes = NotesStore()
     @StateObject private var ledger = LedgerStore()
-    @State private var tab = Tab.home
-
-    enum Tab: Hashable { case home, codes, vault, notes, more }
+    @StateObject private var gpt = GPTStore()
+    @StateObject private var layout = LayoutPrefs()
+    @State private var tab = "home"
 
     var body: some View {
         TabView(selection: $tab) {
             NavigationStack { HomeView(tab: $tab) }
-                .tabItem { Label("首页", systemImage: "square.grid.2x2") }.tag(Tab.home)
-            NavigationStack { CodesView() }
-                .tabItem { Label("验证码", systemImage: "key.horizontal") }.tag(Tab.codes)
-            NavigationStack { VaultView() }
-                .tabItem { Label("密码本", systemImage: "lock") }.tag(Tab.vault)
-            NotesView()
-                .tabItem { Label("备忘录", systemImage: "note.text") }.tag(Tab.notes)
+                .tabItem { Label("首页", systemImage: "square.grid.2x2") }.tag("home")
+            ForEach(layout.tabs, id: \.self) { id in
+                let m = moduleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt)
+                NavigationStack { ModuleView(id: id) }
+                    .tabItem { Label(m.title, systemImage: tabIcon(m.icon)) }.tag(id)
+            }
             NavigationStack { MoreView() }
-                .tabItem { Label("更多", systemImage: "ellipsis.circle") }.tag(Tab.more)
+                .tabItem { Label("更多", systemImage: "ellipsis.circle") }.tag("more")
         }
         .tint(.brand)
         .environmentObject(codes)
         .environmentObject(vault)
         .environmentObject(notes)
         .environmentObject(ledger)
-        .onAppear { codes.api = api; vault.api = api; notes.api = api; ledger.api = api }
+        .environmentObject(gpt)
+        .environmentObject(layout)
+        .onAppear { codes.api = api; vault.api = api; notes.api = api; ledger.api = api; gpt.api = api }
+        .onChange(of: layout.tabs) { t in if tab != "home" && tab != "more" && !t.contains(tab) { tab = "home" } }
     }
+
+    /// 标签栏用不带 .fill 的线条图标，和系统 App 一致
+    private func tabIcon(_ s: String) -> String { s.hasSuffix(".fill") ? String(s.dropLast(5)) : s }
 }
