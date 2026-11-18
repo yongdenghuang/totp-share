@@ -46,6 +46,7 @@ struct CardsView: View {
             if let e = ledger.error { ErrorBanner(message: e) { Task { await ledger.load() } } }
         }
         .listStyle(.insetGrouped)
+        .moduleBackground(Theme.cards)
         .tint(.primary)
         .navigationTitle("支付卡")
         .refreshable { await ledger.load() }
@@ -103,8 +104,9 @@ struct CardsView: View {
     private func issuerSection(_ it: JSON, _ st: Stats) -> some View {
         let iid = it.str("id"), s = st.byIssuer[iid] ?? (0, 0), own = ledger.cards(of: iid)
         Section {
-            ForEach(own, id: \.idKey) { c in cardRow(c, st.byCard[c.str("id")] ?? (0, 0), issuerName: it.str("name")) }
+            ForEach(own, id: \.idKey) { c in cardRow(c, st.byCard[c.str("id")] ?? (0, 0), issuerName: it.str("name")).tintedRow(Theme.pick(iid)) }
             Button { cardForm = CardForm(id: "", issuerID: iid, number: "", expiry: "", cvc: "", note: "") } label: { Label("添加卡号", systemImage: "plus.circle") }
+                .tintedRow(Theme.pick(iid), bar: false)
         } header: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {

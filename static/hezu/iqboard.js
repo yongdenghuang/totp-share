@@ -1,6 +1,8 @@
 'use strict';
 // GPT 账号（网页版）：数据来自用户自己的 sub2api，由本站服务器转发（Key 不会到浏览器）。和 App 里的同一套功能。
 (function () {
+  // 浅色打底（和手机 App 同一套颜色）：按智商状态上色
+  function tinted(el, color) { if (el && color) { el.classList.add('tinted'); el.style.setProperty('--tint', color); } return el; }
   const root = document.getElementById('gpt');
   if (!root) return;
   const showErr = m => { const b = document.createElement('div'); b.className = 'banner bad'; b.textContent = '页面出错：' + m + '（请截图发给我）'; root.prepend(b); };
@@ -189,7 +191,7 @@
     const iq = a.iq;
     const status = a.status === 'error' ? h('span', { class: 'neg', text: '出错' }) : !a.schedulable ? h('span', { class: 'warn', text: '已暂停调度' })
       : a.rateLimitResetAt && until(a.rateLimitResetAt) !== '已重置' ? h('span', { class: 'warn', text: '限流中' }) : h('span', { class: 'faint', text: '正常调度' });
-    return h('div', { class: 'gpt-row' },
+    return tinted(h('div', { class: 'gpt-row' },
       h('div', { class: 'gpt-who' },
         h('div', null, h('b', { text: a.name || a.email }), a.plan ? h('span', { class: 'gpt-plan-tag', text: a.plan }) : null),
         a.email && a.email !== a.name ? h('button', { class: 'gpt-email', type: 'button', title: '点一下复制', text: a.email, onclick: () => copy(a.email, '邮箱') }) : null,
@@ -201,7 +203,8 @@
       bar('7 天', a.sevenDay, 'c7'),
       h('div', { class: 'gpt-actions' },
         h('button', { class: 'btn small', type: 'button', text: '测一次', onclick: () => testRun([a.id]) }),
-        h('button', { class: 'btn small', type: 'button', text: '详情', onclick: () => detail(a) })));
+        h('button', { class: 'btn small', type: 'button', text: '详情', onclick: () => detail(a) }))),
+      iq.label === '正常' ? '#0a8558' : iq.label === '降智' ? '#d32f4c' : '#8891a5');
   }
 
   // ---------- 详情 ----------

@@ -1000,7 +1000,7 @@
       return h('div', { class: 'scroll' }, h('table', { class: 'grid resale', style: 'min-width:1150px;table-layout:fixed' },
         h('colgroup', null, rc.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
         h('thead', null, h('tr', null, rc.map(c => h('th', { class: c[2] ? 'r' : '', text: c[0] })))),
-        h('tbody', null, list.map(r => rowEl(sheet, rows, r, editable, live)))));
+        h('tbody', null, list.map(r => tinted(rowEl(sheet, rows, r, editable, live), rowTint(sheet, r))))));
     }
     const cols = sheet.mode === 'members'
       ? [['账号', 240], ['账号密码', 112]].concat([['续费日期', 134], ['续费卡信息', 126], ['卡号', 118], ['收费情况（每人）', 0], ['收费', 76, 1], ['续费成本', 78, 1], ['利润', 92, 1], ['备注', 88], ['', 42]])
@@ -1008,7 +1008,7 @@
     return h('div', { class: 'scroll' }, h('table', { class: 'grid' + (sheet.mode === 'members' ? '' : ' unitsheet'), style: (sheet.mode === 'members' ? 'min-width:1290px' : 'min-width:1290px') + ';table-layout:fixed' },
       h('colgroup', null, cols.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
       h('thead', null, h('tr', null, cols.map((c, i) => h('th', { class: c[2] === 1 ? 'r' : c[2] === 2 ? 'c' : '' }, i === 0 && list.some(r => r.totpId > 0 && totpById(r.totpId)) ? codeTimerHead(c[0]) : c[0])))),
-      h('tbody', null, list.map(r => rowEl(sheet, rows, r, editable, live)))));
+      h('tbody', null, list.map(r => tinted(rowEl(sheet, rows, r, editable, live), rowTint(sheet, r))))));
   }
   function section(sheet, rows, group, filter, editable, live) {
     const list = rows.filter(filter), key = sheet.id + ':' + (group ? group.id || 'loose' : 'all');
@@ -1350,7 +1350,7 @@
     const total = Object.keys(cs.byIssuer).reduce((a, k) => a + cs.byIssuer[k].cost, 0);
     const panels = shown.map(it => {
       const st = cs.byIssuer[it.id] || { n: 0, cost: 0 }, own = cardsOf(it.id);
-      return h('div', { class: 'group' },
+      return tinted(h('div', { class: 'group' },
         h('div', { class: 'issuer-head' },
           cell(it, 'name', { cls: 'name', placeholder: '卡信息名称', label: '卡信息名称' }),
           cell(it, 'country', { cls: 'country', placeholder: '国家 / 地区', list: 'countries', label: '国家或地区' }),
@@ -1377,7 +1377,7 @@
               }
             } }, h('span', { text: '✕', 'aria-hidden': 'true' })));
         }),
-        h('div', { class: 'group-foot' }, h('button', { class: 'btn ghost small', type: 'button', onclick: async () => { if (await newCardDialog(it)) render(); } }, icon('plus', 15), '添加卡号')));
+        h('div', { class: 'group-foot' }, h('button', { class: 'btn ghost small', type: 'button', onclick: async () => { if (await newCardDialog(it)) render(); } }, icon('plus', 15), '添加卡号'))), tintKey(it.id));
     });
     return [
       h('div', { class: 'tiles' },
@@ -1392,6 +1392,19 @@
 
   // ---------- VPS ----------
   const TAG_COLORS = ['teal', 'blue', 'amber', 'purple', 'green', 'pink', 'red', 'gray'];
+  // 浅色打底（和手机 App 同一套颜色）：本身没颜色的东西按名字固定取一个
+  const TINTS = ['#0d9488', '#ea580c', '#2563eb', '#db2777', '#7c3aed', '#16a34a', '#d97706', '#0891b2', '#dc2626', '#4f46e5', '#c026d3', '#65a30d'];
+  function tintKey(s) { let n = 5381; for (const ch of String(s)) n = (n * 33 + ch.codePointAt(0)) >>> 0; return TINTS[n % TINTS.length]; }
+  function tinted(el, color) { if (el && color) { el.classList.add('tinted'); el.style.setProperty('--tint', color); } return el; }
+  const SHEET_TINTS = ['#7c3aed', '#dc2626', '#4f46e5', '#c026d3', '#0891b2', '#65a30d', '#d97706', '#e11d48', '#0f766e', '#475569'];
+  function rowTint(sheet, r) {
+    if (r.stopped) return '#8891a5';
+    const g = sheet.grouped ? G.find(x => x.id === r.group) : null;
+    if (g) return g.color;
+    if (sheet.grouped) return LOOSE.color;
+    return SHEET_TINTS[Math.max(0, S.sheets.indexOf(sheet)) % SHEET_TINTS.length];
+  }
+  function vpsTint(v, d) { return d != null && d < 0 ? '#d32f4c' : d != null && d <= VPS_DUE_DAYS ? '#ad5f03' : tintKey(v.provider || v.host || ''); }
   function hashColor(text) { let n = 0; for (const ch of String(text)) n = (n * 31 + ch.codePointAt(0)) >>> 0; return 'c-' + TAG_COLORS[n % TAG_COLORS.length]; }
   // 价格列是自由文字（如 "$28.18  40cad"），汇总时取第一个数字，按美元算
   function priceUsd(t) { const m = String(t || '').replace(/,/g, '').match(/\d+(?:\.\d+)?/); return m ? +m[0] : null; }
@@ -1537,7 +1550,7 @@
       const cnyEl = h('div', { class: 'cny' });
       updaters.push(() => { const u = priceUsd(v.price), c = u == null ? null : usdToCny(u); cnyEl.textContent = c == null ? '' : '≈ ' + money(c); });
       const d = daysUntil(v.renew);
-      return h('tr', { class: d == null ? '' : d < 0 ? 'overdue' : d <= VPS_DUE_DAYS ? 'due-soon' : '' },
+      return tinted(h('tr', { class: d == null ? '' : d < 0 ? 'overdue' : d <= VPS_DUE_DAYS ? 'due-soon' : '' },
         h('td', null, h('div', { class: 'hostcell' }, h('span', { class: 'avatar ' + hashColor(v.host || '?'), text: (Array.from(v.host || '?')[0] || '?').toUpperCase(), 'aria-hidden': 'true' }),
           cell(v, 'host', { cls: 'strong', label: '主机', placeholder: '主机名', title: v.host }))),
         h('td', null, siteField(v)),
@@ -1550,7 +1563,7 @@
         h('td', null, h('div', { class: 'price' }, cell(v, 'price', { right: true, label: '价格', placeholder: '$0' }), cnyEl)),
         h('td', null, cell(v, 'email', { label: '注册邮箱', placeholder: '注册邮箱', title: v.email })),
         h('td', null, copyField(v, 'loginPassword', { mask: true, label: '登录密码', placeholder: '登录密码' })),
-        h('td', null, h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => vpsMenu(e.currentTarget, v) }, icon('more'))));
+        h('td', null, h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => vpsMenu(e.currentTarget, v) }, icon('more')))), vpsTint(v, d));
     });
     return [
       vpsTiles(),

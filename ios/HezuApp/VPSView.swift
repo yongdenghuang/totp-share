@@ -28,11 +28,13 @@ struct VPSView: View {
                             Button { editing = v } label: { Label("编辑", systemImage: "pencil") }
                             Button(role: .destructive) { deleting = v } label: { Label("删除", systemImage: "trash") }
                         }
+                        .tintedRow(vpsTint(v))
                 }
             } footer: { Text("左滑删除，右滑复制 IP、密码；30 天内要续费的会标出来。") }
             if let e = ledger.error { ErrorBanner(message: e) { Task { await ledger.load() } } }
         }
         .listStyle(.insetGrouped)
+        .moduleBackground(Theme.vps)
         .navigationTitle("VPS")
         .refreshable { await ledger.load() }
         .toolbar { ToolbarItem(placement: .primaryAction) { Button { editing = newVps() } label: { Image(systemName: "plus") } } }
@@ -71,6 +73,12 @@ struct VPSView: View {
 }
 
 struct VPSRef: Identifiable { let v: JSON; var id: String { v.str("id") } }
+
+/// VPS 行的底色：过期红、30 天内续费橙，其余按服务商（没有就按主机名）固定一个颜色
+func vpsTint(_ v: JSON) -> Color {
+    if let d = daysUntil(v.str("renew")) { if d < 0 { return .bad }; if d <= 30 { return .warn } }
+    return Theme.pick(v.str("provider").isEmpty ? v.str("host") : v.str("provider"))
+}
 
 struct VPSRow: View {
     let v: JSON

@@ -571,7 +571,11 @@
     tag.textContent = meta ? meta.name : '';
     tag.style.background = meta ? meta.color : '';
     tag.style.color = meta ? meta.text : '';
+    // 浅色打底：整行铺一层分组的颜色（没分组的不上色）
+    row.classList.toggle('tinted', !!meta);
+    if (meta) row.style.setProperty('--tint', meta.color); else row.style.removeProperty('--tint');
   }
+  dataRows().forEach(paintGroupTag);
   var groupsUrl = '{{ url_for("groups_page") }}';
   var UNGROUPED = '\u0000ungrouped';
   // 上次的排序和分组筛选记在浏览器里，刷新后还是那样

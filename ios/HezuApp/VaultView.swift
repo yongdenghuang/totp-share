@@ -166,6 +166,7 @@ struct VaultView: View {
                                 Button { editing = it } label: { Label("编辑", systemImage: "pencil") }
                                 Button(role: .destructive) { deleting = it } label: { Label("删除", systemImage: "trash") }
                             }
+                            .tintedRow(store.color(it.type))
                     }
                 } header: {
                     let t = store.type(tid)
@@ -188,6 +189,7 @@ struct VaultView: View {
             if let e = store.error { ErrorBanner(message: e) { Task { await store.load() } } }
         }
         .listStyle(.insetGrouped)
+        .moduleBackground(Theme.vault)
         .navigationTitle("密码本")
         .navigationDestination(for: VaultItem.self) { VaultDetailView(itemID: $0.id) }
         .searchable(text: $query, prompt: "搜索账号、名称、备注")

@@ -129,7 +129,7 @@ struct CodesView: View {
                 }
                 ForEach(filteredSections, id: \.title) { sec in
                     Section {
-                        ForEach(sec.items) { a in row(a, left: left) }
+                        ForEach(sec.items) { a in row(a, left: left).tintedRow(sec.color) }
                     } header: {
                         HStack(spacing: 6) {
                             Circle().fill(sec.color).frame(width: 8, height: 8)
@@ -144,6 +144,7 @@ struct CodesView: View {
                 if let e = store.error { ErrorBanner(message: e) { Task { await store.load() } } }
             }
             .listStyle(.insetGrouped)
+            .moduleBackground(Theme.codes)
             .onChange(of: left) { if $0 == 0 { Task { await store.refreshCodes() } } }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) { CountdownRing(left: left, period: store.period) }

@@ -1,6 +1,10 @@
 'use strict';
 // 密码本 + 备忘录。数据都在服务器上加密保存，一条一条地存；密码本的列表里不带密码，点复制或编辑时才去取。
 (function () {
+  // 浅色打底（和手机 App 同一套颜色）：本身没颜色的东西按名字固定取一个
+  const TINTS = ['#0d9488', '#ea580c', '#2563eb', '#db2777', '#7c3aed', '#16a34a', '#d97706', '#0891b2', '#dc2626', '#4f46e5', '#c026d3', '#65a30d'];
+  function tintKey(s) { let n = 5381; for (const ch of String(s)) n = (n * 33 + ch.codePointAt(0)) >>> 0; return TINTS[n % TINTS.length]; }
+  function tinted(el, color) { if (el && color) { el.classList.add('tinted'); el.style.setProperty('--tint', color); } return el; }
   const root = document.getElementById('vault');
   if (!root) return;
   const PAGE = root.dataset.page;
@@ -244,7 +248,7 @@
         h('div', { class: 'scroll' }, h('table', { class: 'grid vtable' },
           h('colgroup', null, h('col', { style: 'width:15%' }), h('col', { style: 'width:22%' }), h('col', { style: 'width:180px' }), h('col', { style: 'width:170px' }), h('col', { style: 'width:110px' }), h('col'), h('col', { style: 'width:44px' })),
           h('thead', null, h('tr', null, ['名称', '账号', '密码', '绑定手机', '官网', '备注', ''].map(x => h('th', { text: x })))),
-          h('tbody', null, list.map(it => itemRow(it, t))))));
+          h('tbody', null, list.map(it => tinted(itemRow(it, t), t ? t.color : '#6c757d'))))));
     }
 
     // ---- 表格里直接改：有内容时点一下复制、旁边的小笔改；空着的格子直接是输入框（和账本页一样） ----
@@ -582,9 +586,9 @@
         }
         const list = sorted().filter(n => !k || String(n.text || '').toLowerCase().includes(k));
         if (cur && cur.id == null && !k) list.unshift(cur);
-        setKids(items, list.length ? list.map(n => h('button', { class: 'nitem' + (cur && n === cur || cur && cur.id != null && n.id === cur.id ? ' on' : ''), type: 'button', onclick: () => open(n) },
+        setKids(items, list.length ? list.map(n => tinted(h('button', { class: 'nitem' + (cur && n === cur || cur && cur.id != null && n.id === cur.id ? ' on' : ''), type: 'button', onclick: () => open(n) },
           h('div', { class: 'nt' }, n.pinned ? icon('pin', 13) : null, h('span', { text: titleOf(n.text) })),
-          h('div', { class: 'np' }, h('span', { class: 'nd', text: shortDate(n.updated) }), h('span', { text: previewOf(n.text) || (n.id == null ? '还没保存' : '没有其他内容') })))) :
+          h('div', { class: 'np' }, h('span', { class: 'nd', text: shortDate(n.updated) }), h('span', { text: previewOf(n.text) || (n.id == null ? '还没保存' : '没有其他内容') }))), n.pinned ? '#eab308' : n.id == null ? null : tintKey(String(n.id)))) :
           h('div', { class: 'nempty', text: k ? '没有找到包含「' + q.trim() + '」的备忘录。' : '还没有备忘录，点右上角的 ＋ 新建一条。' }));
       }
       setKids(listEl,

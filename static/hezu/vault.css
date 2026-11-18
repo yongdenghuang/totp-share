@@ -138,3 +138,11 @@ dialog.dlg.vdlg { width: min(680px, calc(100vw - 24px)); }
   .nbar .nmeta { display: none; }
   .ntext { padding: 16px 18px 60px; font-size: 16px; }
 }
+
+/* 浅色打底：备忘录选中的那条颜色深一点；手机上密码本每张卡片左边一条色条 */
+.nitem.tinted { margin-bottom: 4px; }
+.nitem.tinted.on { background-color: color-mix(in srgb, var(--tint) 20%, var(--panel)); box-shadow: inset 4px 0 0 var(--tint), 0 0 0 1.5px var(--tint-line); }
+@media (max-width: 880px) {
+  .vtable tr.tinted { box-shadow: inset 4px 0 0 var(--tint); }
+  .vtable tr.tinted > td, .vtable tr.tinted:hover > td { background: transparent !important; }
+}

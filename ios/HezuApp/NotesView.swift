@@ -81,8 +81,8 @@ struct NotesView: View {
             List {
                 let list = filtered
                 let pinned = list.filter(\.pinned), rest = list.filter { !$0.pinned }
-                if !pinned.isEmpty { Section("置顶") { ForEach(pinned) { row($0) } } }
-                if !rest.isEmpty { Section(pinned.isEmpty ? "" : "备忘录") { ForEach(rest) { row($0) } } }
+                if !pinned.isEmpty { Section("置顶") { ForEach(pinned) { row($0).tintedRow(Theme.notes) } } }
+                if !rest.isEmpty { Section(pinned.isEmpty ? "" : "备忘录") { ForEach(rest) { row($0).tintedRow(Theme.pick(String($0.id))) } } }
                 if store.loaded && store.notes.isEmpty && store.error == nil {
                     VStack(spacing: 8) {
                         Image(systemName: "note.text").font(.largeTitle).foregroundStyle(.secondary)
@@ -96,6 +96,7 @@ struct NotesView: View {
                 if let e = store.error { ErrorBanner(message: e) { Task { await store.load() } } }
             }
             .listStyle(.insetGrouped)
+            .moduleBackground(Theme.notes)
             .navigationTitle("备忘录")
             .searchable(text: $query, prompt: "搜索")
             .refreshable { await store.load() }

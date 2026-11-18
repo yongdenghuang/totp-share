@@ -93,16 +93,18 @@ struct GPTView: View {
     private var list: some View {
         List {
             Section { header }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
-            Section { planRow }
+            Section { planRow.tintedRow(Theme.gpt, bar: false) }
             Section {
                 ForEach(shown, id: \.idKey) { a in
                     NavigationLink { GPTDetail(id: a.int("id")) } label: { GPTRow(a: a) }
+                        .tintedRow(iqColor(a.dict("iq").str("label")))
                 }
                 if store.loaded && store.accounts.isEmpty { Text("sub2api 里还没有 GPT 账号，点右上角 ＋ 授权登录。").foregroundStyle(.secondary) }
             } header: { Text("账号") } footer: { Text("智商状态看最近一次糖果题：答对是「正常」，答错是「降智」，请求失败或还没测是「待确认」。连续答错 3 次会被标记。") }
             if let e = store.error { ErrorBanner(message: e) { Task { await store.load() } } }
         }
         .listStyle(.insetGrouped)
+        .moduleBackground(Theme.gpt)
         .refreshable { await store.load() }
         .toolbar {
             ToolbarItem(placement: .primaryAction) { Button { adding = true } label: { Image(systemName: "plus") } }

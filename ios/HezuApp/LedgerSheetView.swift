@@ -35,6 +35,8 @@ struct LedgerSheetView: View {
     private var month: String { ym.isEmpty ? ledger.latestMonth : ym }
     private var editable: Bool { !ledger.isArchived(month) || unlocked.contains(month) }
     private var allRows: [JSON] { ledger.rows(month, sheetID) }
+    /// 和首页方块同一个颜色
+    private var sheetTint: Color { tileColors("sheet:" + sheetID, ledger)[1] }
 
     var body: some View {
         List {
@@ -67,11 +69,13 @@ struct LedgerSheetView: View {
                                 }
                             }
                             .contextMenu { rowMenu(r) }
+                            .tintedRow(r.bool("stopped") ? .gray : (sec.color ?? sheetTint))
                     }
                     if editable {
                         Button { editing = RowRef(id: "", preset: sec.groupID ?? "") } label: {
                             Label(mode == "resale" ? "添加项目" : "添加账号", systemImage: "plus.circle")
                         }
+                        .tintedRow(sec.color ?? sheetTint, bar: false)
                     }
                 } header: { sectionHeader(sec) }
             }
@@ -86,6 +90,7 @@ struct LedgerSheetView: View {
             if let e = ledger.error { ErrorBanner(message: e) { Task { await ledger.load() } } }
         }
         .listStyle(.insetGrouped)
+        .moduleBackground(sheetTint)
         .navigationTitle(sheet.str("name"))
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "搜索账号、备注、卡种")

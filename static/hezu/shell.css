@@ -134,3 +134,19 @@ body.hz tr.sortable-drag { background: var(--panel); }
   .fxw { left: 10px; right: 10px; bottom: 10px; width: auto; max-height: 70vh; }
   .side .side-foot .nav[data-fx-toggle] span { display: none; }
 }
+
+/* 浅色打底：每一行 / 每一块用自己的颜色（分组、类型、状态）淡淡铺一层，左边一条色条。
+   颜色由页面脚本写在 --tint 上，和手机 App 用同一套颜色。 */
+.tinted { --tint-bg: color-mix(in srgb, var(--tint) 7%, var(--panel)); --tint-hover: color-mix(in srgb, var(--tint) 12%, var(--panel)); --tint-line: color-mix(in srgb, var(--tint) 24%, var(--line)); }
+@media (prefers-color-scheme: dark) {
+  .tinted { --tint-bg: color-mix(in srgb, var(--tint) 12%, var(--panel)); --tint-hover: color-mix(in srgb, var(--tint) 18%, var(--panel)); --tint-line: color-mix(in srgb, var(--tint) 35%, var(--line)); }
+}
+tr.tinted { background-color: var(--tint-bg); }
+tr.tinted > td { background-color: var(--tint-bg); }
+tr.tinted:hover > td { background-color: var(--tint-hover) !important; }
+tr.tinted > td:first-child { background-image: linear-gradient(var(--tint), var(--tint)); background-size: 4px 100%; background-repeat: no-repeat; }
+.table tr.tinted { --bs-table-bg: var(--tint-bg); }
+div.tinted, button.tinted { background-color: var(--tint-bg); box-shadow: inset 4px 0 0 var(--tint); }
+div.tinted:hover, button.tinted:hover { background-color: var(--tint-hover); }
+.group.tinted { border-color: var(--tint-line); box-shadow: inset 0 3px 0 var(--tint), var(--shadow); }
+.group.tinted:hover { background-color: var(--tint-bg); }
