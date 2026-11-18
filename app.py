@@ -1031,6 +1031,8 @@ import vault    # noqa: E402
 vault.install(sys.modules[__name__])
 import appapi   # noqa: E402
 appapi.install(sys.modules[__name__])
+import gptlink  # noqa: E402
+gptlink.install(sys.modules[__name__])
 
 if __name__ == "__main__":
     app.run(host=os.environ.get("BIND_ADDR", "127.0.0.1"),

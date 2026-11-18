@@ -57,6 +57,15 @@
 密码本列表页不下发密码和标了保密的附加信息，点复制、点小眼睛或打开编辑时才单独取。
 同一条在两个窗口里同时改时，后保存的一方会被提示选择保留哪个版本，不会悄悄覆盖。
 
+## GPT 账号（接入 sub2api）
+
+App 里的「GPT 账号」读取你自己部署的 sub2api：每个 GPT 账号的智商状态（最近一次糖果题）、5 小时 / 7 天额度、
+套餐和状态；可以在 App 里授权登录新账号（OpenAI OAuth，粘贴跳转后的 localhost 地址）、立即测试、开关定期测试
+（在 sub2api 里建一个只测糖果题的计划）、刷新额度、暂停调度、删除账号。
+
+合租管理只保存 sub2api 的地址和管理员 API Key（Fernet 加密），所有请求由服务器转发，Key 不会下发到浏览器或手机。
+Key 需要在 sub2api 后台「系统设置 → 安全与认证 → 管理员访问密钥」创建，并勾选「全权访问」。
+
 ## iOS App
 
 `ios/` 里是一个原生 iOS App（SwiftUI + WKWebView），打开的就是这个后台，另外加了面容 ID 解锁、
@@ -172,6 +181,9 @@ python3 -m venv .venv
 | `hezu.py` | 合租账本的接口和加密存储 |
 | `hezu_xlsx.py` | 解析原来的合租 Excel |
 | `vault.py` | 密码本和备忘录的接口和加密存储 |
+| `appapi.py` | iOS App 用的接口（登录、验证码账号、访问记录、设置、分组） |
+| `gptlink.py` | GPT 账号：转发到 sub2api |
+| `hezu_export.py` | 合租账本导出 Excel（服务器端） |
 | `static/hezu/` | 合租账本的页面脚本和样式；`shell.css` 是整个后台共用的配色和左侧导航 |
 | `backup.py` | 加密备份脚本 |
 | `templates/` | 页面模板 |
