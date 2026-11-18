@@ -20,7 +20,8 @@ final class AppSettings: ObservableObject {
     private let defaults = UserDefaults.standard
 
     init() {
-        defaults.register(defaults: [Self.lockKey: true, Self.lockAfterKey: "60"])
+        // Mac 上默认不上锁（电脑本身有锁屏），要的话在 App 里「更多 → App 设置」打开
+        defaults.register(defaults: [Self.lockKey: !ProcessInfo.processInfo.isMacCatalystApp, Self.lockAfterKey: "60"])
         reload()
     }
 
@@ -30,6 +31,10 @@ final class AppSettings: ObservableObject {
         lockEnabled = defaults.bool(forKey: Self.lockKey)
         lockAfterSeconds = Double(defaults.string(forKey: Self.lockAfterKey) ?? "60") ?? 60
     }
+
+    /// App 里直接改解锁保护（Mac 上没有系统「设置」里的页面）
+    func setLock(_ on: Bool) { defaults.set(on, forKey: Self.lockKey); reload() }
+    func setLockAfter(_ seconds: Int) { defaults.set(String(seconds), forKey: Self.lockAfterKey); reload() }
 
     /// 保存服务器地址；地址不对时返回错误说明
     func setServer(_ text: String) -> String? {

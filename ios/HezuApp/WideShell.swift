@@ -23,25 +23,45 @@ struct WideShell: View {
     @EnvironmentObject var notes: NotesStore
     @EnvironmentObject var gpt: GPTStore
     @EnvironmentObject var api: API
+    @EnvironmentObject var layout: LayoutPrefs
     @AppStorage("wide_selection") private var selection = "home"
     @State private var reloadToken = 0
     @State private var columns = NavigationSplitViewVisibility.all
 
-    /// 左栏的分组：概览 / 合租账本 / 工具 / 后台
-    private var groups: [(title: String, ids: [String])] {
-        [("", ["home"]),
-         ("合租账本", ledger.sheetInfo.map { "sheet:" + $0.id } + ["cards", "vps"]),
-         ("工具", ["codes", "vault", "notes", "gpt"]),
-         ("后台", ["more"])]
+    /// 全部入口（「更多」固定在最下面）
+    private var allIDs: [String] { ["home"] + ledger.moduleIDs.filter { $0.hasPrefix("sheet:") } + ["cards", "vps", "codes", "vault", "notes", "gpt"] }
+    private var pins: [String] { layout.pins.filter { allIDs.contains($0) } }
+    /// 左栏分组：常用（自己选的快捷入口）/ 合租账本 / 工具；放进常用的就不在下面重复出现
+    private var groups: [(key: String, title: String, ids: [String])] {
+        let rest = { (ids: [String]) in layout.sideOrdered(ids.filter { !pins.contains($0) }) }
+        return [("pins", "常用", pins),
+                ("top", "", rest(["home"])),
+                ("ledger", "合租账本", rest(ledger.moduleIDs.filter { $0.hasPrefix("sheet:") } + ["cards", "vps"])),
+                ("tools", "工具", rest(["codes", "vault", "notes", "gpt"])),
+                ("more", "", ["more"])]
+            .filter { !$0.ids.isEmpty || $0.key == "pins" }
     }
-    private var flat: [String] { groups.flatMap(\.ids) }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
             List(selection: Binding(get: { selection }, set: { if let v = $0 { selection = v } })) {
-                ForEach(groups, id: \.title) { g in
-                    Section(g.title) {
-                        ForEach(g.ids, id: \.self) { id in sidebarRow(id).tag(id) }
+                ForEach(groups, id: \.key) { g in
+                    Section {
+                        if g.key == "pins" && g.ids.isEmpty {
+                            Text("右键任意一项 →「添加到常用」").font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(g.ids, id: \.self) { id in
+                            sidebarRow(id, shortcut: g.key == "pins" ? g.ids.firstIndex(of: id).map { $0 + 1 } : nil)
+                                .tag(id)
+                                .contextMenu { menu(id, group: g) }
+                                .modifier(DragReorder(id: id, enabled: id != "more") { dragged in drop(dragged, onto: id, group: g) })
+                        }
+                    } header: {
+                        if !g.title.isEmpty { Text(g.title) }
+                    } footer: {
+                        if g.key == "pins" && !g.ids.isEmpty {
+                            Text("拖动调整顺序，拖到下面的分组里就移出常用；⌘1…⌘\(g.ids.count) 直接打开").font(.caption2)
+                        }
                     }
                 }
             }
@@ -56,7 +76,7 @@ struct WideShell: View {
             .environment(\.openModule) { id in selection = id }
         }
         .tint(.brand)
-        .onAppear { if !flat.contains(selection) { selection = "home" } }
+        .onAppear { if !allIDs.contains(selection) && selection != "more" { selection = "home" } }
     }
 
     @ViewBuilder
@@ -68,7 +88,38 @@ struct WideShell: View {
         }
     }
 
-    private func sidebarRow(_ id: String) -> some View {
+    /// 拖一项放到另一项上：同组里是排序；拖进「常用」是加入常用；从常用拖出去是移出
+    private func drop(_ dragged: String, onto target: String, group: (key: String, title: String, ids: [String])) {
+        guard dragged != target, allIDs.contains(dragged) else { return }
+        if group.key == "pins" {
+            if !layout.pins.contains(dragged) {
+                guard layout.pins.count < LayoutPrefs.maxPins else { return }
+                layout.pins.append(dragged)
+            }
+            layout.pinMove(dragged, onto: target)
+        } else if layout.pins.contains(dragged) {
+            layout.pins.removeAll { $0 == dragged }
+        } else if group.ids.contains(dragged) {
+            layout.sideMove(dragged, onto: target, in: group.ids)
+        }
+    }
+
+    @ViewBuilder
+    private func menu(_ id: String, group: (key: String, title: String, ids: [String])) -> some View {
+        if id != "more" {
+            if layout.pins.contains(id) {
+                Button { layout.togglePin(id) } label: { Label("从常用移除", systemImage: "star.slash") }
+                Button { layout.pinShift(id, by: -1) } label: { Label("上移", systemImage: "arrow.up") }.disabled(group.ids.first == id)
+                Button { layout.pinShift(id, by: 1) } label: { Label("下移", systemImage: "arrow.down") }.disabled(group.ids.last == id)
+            } else {
+                Button { layout.togglePin(id) } label: { Label("添加到常用", systemImage: "star") }.disabled(layout.pins.count >= LayoutPrefs.maxPins)
+                Button { layout.sideShift(id, by: -1, in: group.ids) } label: { Label("上移", systemImage: "arrow.up") }.disabled(group.ids.first == id)
+                Button { layout.sideShift(id, by: 1, in: group.ids) } label: { Label("下移", systemImage: "arrow.down") }.disabled(group.ids.last == id)
+            }
+        }
+    }
+
+    private func sidebarRow(_ id: String, shortcut: Int?) -> some View {
         let m: ModuleInfo = id == "home" ? ModuleInfo(title: "首页", sub: "", icon: "square.grid.2x2.fill", color: .brand)
             : id == "more" ? ModuleInfo(title: "更多", sub: "", icon: "ellipsis.circle.fill", color: .gray)
             : moduleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt)
@@ -79,14 +130,15 @@ struct WideShell: View {
                 .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             Text(m.title).lineLimit(1)
             Spacer(minLength: 4)
-            if !m.sub.isEmpty { Text(m.sub).font(.caption).foregroundStyle(.secondary).monospacedDigit() }
+            if let shortcut, shortcut <= 9 { Text("⌘\(shortcut)").font(.caption2.monospaced()).foregroundStyle(.tertiary) }
+            else if !m.sub.isEmpty { Text(m.sub).font(.caption).foregroundStyle(.secondary).monospacedDigit() }
         }
     }
 
-    /// 看不见的按钮，只为了接快捷键
+    /// 看不见的按钮，只为了接快捷键：⌘1…⌘9 打开常用里的第几个，⌘R 刷新
     private var shortcuts: some View {
         ZStack {
-            ForEach(Array(flat.prefix(9).enumerated()), id: \.offset) { i, id in
+            ForEach(Array(pins.prefix(9).enumerated()), id: \.offset) { i, id in
                 Button("") { selection = id }.keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
             }
             Button("") {
@@ -95,5 +147,24 @@ struct WideShell: View {
             }.keyboardShortcut("r", modifiers: .command)
         }
         .opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
+    }
+}
+
+/// 左栏一行可以拖：按住拖到另一行上放下
+private struct DragReorder: ViewModifier {
+    let id: String
+    let enabled: Bool
+    let onDrop: (String) -> Void
+    @State private var targeted = false
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .draggable(id)
+                .dropDestination(for: String.self) { items, _ in
+                    guard let d = items.first else { return false }
+                    onDrop(d); return true
+                } isTargeted: { targeted = $0 }
+                .overlay(alignment: .top) { if targeted { Capsule().fill(Color.brand).frame(height: 2).offset(y: -4) } }
+        } else { content }
     }
 }

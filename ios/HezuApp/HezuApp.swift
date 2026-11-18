@@ -47,9 +47,11 @@ struct RootView: View {
                 lock.becameActive(enabled: settings.lockEnabled && settings.homeURL != nil,
                                   after: settings.lockAfterSeconds)
             case .inactive:
-                lock.covered = true // 多任务界面里不露出账号密码
+                // 手机：多任务界面里不露出账号密码。Mac：点到别的 App 时窗口照常显示
+                if !ProcessInfo.processInfo.isMacCatalystApp { lock.covered = true }
             case .background:
                 lock.wentToBackground()
+                if ProcessInfo.processInfo.isMacCatalystApp { lock.covered = settings.lockEnabled }
             @unknown default:
                 break
             }

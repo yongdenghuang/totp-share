@@ -8,17 +8,60 @@ final class LayoutPrefs: ObservableObject {
     @Published var tabs: [String] { didSet { save() } }          // 首页和「更多」之间的标签，最多 3 个
     @Published var homeOrder: [String] { didSet { save() } }     // 首页方框的顺序
     @Published var homeHidden: Set<String> { didSet { save() } } // 首页不显示的方框
+    // 宽屏（Mac、iPad）左栏：顶上「常用」放几个快捷入口（最多 9 个，⌘1…⌘9 打开），其余模块的顺序可以拖动调整
+    static let maxPins = 9
+    @Published var pins: [String] { didSet { save() } }
+    @Published var sideOrder: [String] { didSet { save() } }
 
     private let d = UserDefaults.standard
     init() {
         tabs = d.stringArray(forKey: "layout_tabs") ?? Self.defaultTabs
         homeOrder = d.stringArray(forKey: "layout_home_order") ?? []
         homeHidden = Set(d.stringArray(forKey: "layout_home_hidden") ?? [])
+        pins = d.stringArray(forKey: "layout_pins") ?? ["home", "codes", "vault", "notes"]
+        sideOrder = d.stringArray(forKey: "layout_side_order") ?? []
     }
     private func save() {
         d.set(tabs, forKey: "layout_tabs")
         d.set(homeOrder, forKey: "layout_home_order")
         d.set(Array(homeHidden), forKey: "layout_home_hidden")
+        d.set(pins, forKey: "layout_pins")
+        d.set(sideOrder, forKey: "layout_side_order")
+    }
+
+    /// 左栏某一组按保存的顺序排（新出现的接在后面）
+    func sideOrdered(_ ids: [String]) -> [String] {
+        let known = sideOrder.filter { ids.contains($0) }
+        return known + ids.filter { !known.contains($0) }
+    }
+    /// 拖到 target 上：往下拖放在它后面，往上拖放在它前面
+    static func moved(_ list: [String], _ id: String, onto target: String) -> [String] {
+        var o = list
+        guard id != target, let from = o.firstIndex(of: id), let t = o.firstIndex(of: target) else { return list }
+        o.remove(at: from)
+        let ti = o.firstIndex(of: target)!
+        o.insert(id, at: from < t ? ti + 1 : ti)
+        return o
+    }
+    func sideMove(_ id: String, onto target: String, in ids: [String]) {
+        sideOrder = sideOrder.filter { !ids.contains($0) } + Self.moved(sideOrdered(ids), id, onto: target)
+    }
+    func sideShift(_ id: String, by delta: Int, in ids: [String]) {
+        var o = sideOrdered(ids)
+        guard let i = o.firstIndex(of: id) else { return }
+        let j = max(0, min(o.count - 1, i + delta)); guard j != i else { return }
+        o.swapAt(i, j)
+        sideOrder = sideOrder.filter { !ids.contains($0) } + o
+    }
+    func pinMove(_ id: String, onto target: String) { pins = Self.moved(pins, id, onto: target) }
+    func pinShift(_ id: String, by delta: Int) {
+        guard let i = pins.firstIndex(of: id) else { return }
+        let j = max(0, min(pins.count - 1, i + delta)); guard j != i else { return }
+        var p = pins; p.swapAt(i, j); pins = p
+    }
+    func togglePin(_ id: String) {
+        if pins.contains(id) { pins.removeAll { $0 == id } }
+        else if pins.count < Self.maxPins { pins.append(id) }
     }
 
     /// 按保存的顺序排好全部模块；新出现的模块（新建的表）接在后面
@@ -79,10 +122,45 @@ struct LayoutSettingsView: View {
     @EnvironmentObject var notes: NotesStore
     @EnvironmentObject var gpt: GPTStore
 
-    private func info(_ id: String) -> ModuleInfo { moduleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt) }
+    @Environment(\.horizontalSizeClass) private var hSize
+    private func info(_ id: String) -> ModuleInfo {
+        id == "home" ? ModuleInfo(title: "首页", sub: "", icon: "square.grid.2x2.fill", color: .brand) : moduleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt)
+    }
 
     var body: some View {
         List {
+            if hSize == .regular { pinsSection } else { tabsSection }
+            homeSection
+        }
+        .environment(\.editMode, .constant(.active))
+        .navigationTitle(hSize == .regular ? "自定义首页和左栏" : "自定义首页和底部标签")
+    }
+
+    /// 宽屏：左栏「常用」里的快捷入口
+    private var pinsSection: some View {
+        Section {
+            ForEach(layout.pins, id: \.self) { id in
+                HStack {
+                    Image(systemName: info(id).icon).foregroundStyle(info(id).color).frame(width: 26)
+                    Text(info(id).title)
+                    Spacer()
+                    if let i = layout.pins.firstIndex(of: id), i < 9 { Text("⌘\(i + 1)").font(.caption.monospaced()).foregroundStyle(.secondary) }
+                }
+            }
+            .onMove { layout.pins.move(fromOffsets: $0, toOffset: $1) }
+            .onDelete { layout.pins.remove(atOffsets: $0) }
+            if layout.pins.count < LayoutPrefs.maxPins {
+                Menu {
+                    ForEach((["home"] + ledger.moduleIDs).filter { !layout.pins.contains($0) }, id: \.self) { id in
+                        Button { layout.pins.append(id) } label: { Label(info(id).title, systemImage: info(id).icon) }
+                    }
+                } label: { Label("添加快捷入口", systemImage: "plus.circle") }
+            }
+            Button("恢复默认（首页、验证码、密码本、备忘录）") { layout.pins = ["home", "codes", "vault", "notes"] }
+        } header: { Text("左栏「常用」") } footer: { Text("最多 \(LayoutPrefs.maxPins) 个，按顺序对应 ⌘1…⌘9。也可以直接在左栏拖动，或者右键「添加到常用 / 从常用移除」。") }
+    }
+
+    private var tabsSection: some View {
             Section {
                 ForEach(0..<3, id: \.self) { i in
                     Picker("第 \(i + 1) 个", selection: Binding(
@@ -100,7 +178,9 @@ struct LayoutSettingsView: View {
                 }
                 Button("恢复默认（验证码、密码本、备忘录）") { layout.tabs = LayoutPrefs.defaultTabs }
             } header: { Text("底部标签") } footer: { Text("「首页」和「更多」固定在两头，中间最多放 3 个常用的模块。") }
+    }
 
+    private var homeSection: some View {
             Section {
                 ForEach(layout.ordered(ledger.moduleIDs), id: \.self) { id in
                     let m = info(id), hidden = layout.homeHidden.contains(id)
@@ -119,9 +199,6 @@ struct LayoutSettingsView: View {
                 }
                 Button("恢复默认顺序，全部显示") { layout.homeOrder = []; layout.homeHidden = [] }
             } header: { Text("首页方框") } footer: { Text("拖动右边的三条线调整顺序（也可以直接在首页长按方块拖动），点眼睛隐藏或显示。") }
-        }
-        .environment(\.editMode, .constant(.active))
-        .navigationTitle("自定义首页和标签")
     }
 }
 

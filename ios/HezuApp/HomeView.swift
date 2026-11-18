@@ -268,8 +268,12 @@ struct MoreView: View {
             }
             Section {
                 NavigationLink { LayoutSettingsView() } label: { Label("自定义首页和底部标签", systemImage: "square.grid.3x3.square") }
-                Button { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } } label: {
-                    Label("App 设置（服务器地址、面容 ID）", systemImage: "iphone")
+                if isMac {
+                    NavigationLink { MacAppSettings() } label: { Label("App 设置（解锁保护）", systemImage: "desktopcomputer") }
+                } else {
+                    Button { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } } label: {
+                        Label("App 设置（服务器地址、面容 ID）", systemImage: "iphone")
+                    }
                 }
                 Button(role: .destructive) { confirmLogout = true } label: { Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right") }
             } footer: {
@@ -298,4 +302,24 @@ struct TileDrop: DropDelegate {
     func dropEntered(info: DropInfo) { if let d = dragging, d != target { move(d, target) } }
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
     func performDrop(info: DropInfo) -> Bool { dragging = nil; return true }
+}
+
+/// Mac 版的 App 设置（手机上这些在系统「设置」→ 合租管理 里）
+struct MacAppSettings: View {
+    @EnvironmentObject var settings: AppSettings
+    @EnvironmentObject var api: API
+    var body: some View {
+        Form {
+            Section {
+                Toggle("打开 App 时要验证（触控 ID 或电脑密码）", isOn: Binding(get: { settings.lockEnabled }, set: { settings.setLock($0) }))
+                if settings.lockEnabled {
+                    Picker("离开多久后重新验证", selection: Binding(get: { Int(settings.lockAfterSeconds) }, set: { settings.setLockAfter($0) })) {
+                        Text("1 分钟").tag(60); Text("15 分钟").tag(900); Text("1 小时").tag(3600); Text("8 小时").tag(28800)
+                    }
+                }
+            } header: { Text("解锁保护") } footer: { Text("关掉后打开就直接进入，不用再输电脑密码。登录状态一直保存，30 天内不用重新登录。") }
+            Section("服务器") { Text(api.host).foregroundStyle(.secondary) }
+        }
+        .navigationTitle("App 设置")
+    }
 }
