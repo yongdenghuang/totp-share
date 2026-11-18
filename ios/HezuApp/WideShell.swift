@@ -27,6 +27,8 @@ struct WideShell: View {
     @AppStorage("wide_selection") private var selection = "home"
     @State private var reloadToken = 0
     @State private var columns = NavigationSplitViewVisibility.all
+    private static var launched = false
+    @AppStorage("wide_sorting") private var sorting = false   // 「排序」模式：每行右边出现拖动把手
 
     /// 全部入口（「更多」固定在最下面）
     private var allIDs: [String] { ["home"] + ledger.moduleIDs.filter { $0.hasPrefix("sheet:") } + ["cards", "vps", "codes", "vault", "notes", "gpt"] }
@@ -54,18 +56,33 @@ struct WideShell: View {
                             sidebarRow(id, shortcut: g.key == "pins" ? g.ids.firstIndex(of: id).map { $0 + 1 } : nil)
                                 .tag(id)
                                 .contextMenu { menu(id, group: g) }
-                                .modifier(DragReorder(id: id, enabled: id != "more") { dragged in drop(dragged, onto: id, group: g) })
+                                .moveDisabled(id == "more")
                         }
+                        // 系统自带的列表拖动排序（Mac 上直接拖；「排序」模式下拖右边的三条线）
+                        .onMove { from, to in move(g, from: from, to: to) }
                     } header: {
-                        if !g.title.isEmpty { Text(g.title) }
+                        if g.key == "pins" {
+                            HStack {
+                                Text(g.title)
+                                Spacer()
+                                Button {
+                                    withAnimation { sorting.toggle() }
+                                } label: {
+                                    Label(sorting ? "完成" : "排序", systemImage: sorting ? "checkmark" : "arrow.up.arrow.down")
+                                        .font(.caption.weight(.semibold)).labelStyle(.titleAndIcon)
+                                }
+                                .buttonStyle(.borderless).textCase(nil)
+                            }
+                        } else if !g.title.isEmpty { Text(g.title) }
                     } footer: {
                         if g.key == "pins" && !g.ids.isEmpty {
-                            Text("拖动调整顺序，拖到下面的分组里就移出常用；⌘1…⌘\(g.ids.count) 直接打开").font(.caption2)
+                            Text("点「排序」后拖动右边的三条线调整顺序；右键「添加到常用 / 从常用移除」；⌘1…⌘\(g.ids.count) 直接打开").font(.caption2)
                         }
                     }
                 }
             }
             .listStyle(.sidebar)
+            .environment(\.editMode, .constant(sorting ? .active : .inactive))
             .navigationTitle("合租管理")
             .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
             .background(shortcuts)
@@ -76,7 +93,10 @@ struct WideShell: View {
             .environment(\.openModule) { id in selection = id }
         }
         .tint(.brand)
-        .onAppear { if !allIDs.contains(selection) && selection != "more" { selection = "home" } }
+        .onAppear {
+            if !Self.launched { Self.launched = true; sorting = false }   // 每次打开 App 都从非排序状态开始（只在启动时一次）
+            if !allIDs.contains(selection) && selection != "more" { selection = "home" }
+        }
     }
 
     @ViewBuilder
@@ -88,19 +108,14 @@ struct WideShell: View {
         }
     }
 
-    /// 拖一项放到另一项上：同组里是排序；拖进「常用」是加入常用；从常用拖出去是移出
-    private func drop(_ dragged: String, onto target: String, group: (key: String, title: String, ids: [String])) {
-        guard dragged != target, allIDs.contains(dragged) else { return }
-        if group.key == "pins" {
-            if !layout.pins.contains(dragged) {
-                guard layout.pins.count < LayoutPrefs.maxPins else { return }
-                layout.pins.append(dragged)
-            }
-            layout.pinMove(dragged, onto: target)
-        } else if layout.pins.contains(dragged) {
-            layout.pins.removeAll { $0 == dragged }
-        } else if group.ids.contains(dragged) {
-            layout.sideMove(dragged, onto: target, in: group.ids)
+    /// 同一组里拖动排序
+    private func move(_ g: (key: String, title: String, ids: [String]), from: IndexSet, to: Int) {
+        if g.key == "pins" {
+            layout.pins.move(fromOffsets: from, toOffset: to)
+        } else {
+            var o = g.ids
+            o.move(fromOffsets: from, toOffset: to)
+            layout.sideOrder = layout.sideOrder.filter { !g.ids.contains($0) } + o
         }
     }
 
@@ -130,7 +145,8 @@ struct WideShell: View {
                 .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             Text(m.title).lineLimit(1)
             Spacer(minLength: 4)
-            if let shortcut, shortcut <= 9 { Text("⌘\(shortcut)").font(.caption2.monospaced()).foregroundStyle(.tertiary) }
+            if sorting { EmptyView() }   // 排序时右边是拖动把手，不放数字，免得名字被挤掉
+            else if let shortcut, shortcut <= 9 { Text("⌘\(shortcut)").font(.caption2.monospaced()).foregroundStyle(.tertiary) }
             else if !m.sub.isEmpty { Text(m.sub).font(.caption).foregroundStyle(.secondary).monospacedDigit() }
         }
     }
@@ -147,24 +163,5 @@ struct WideShell: View {
             }.keyboardShortcut("r", modifiers: .command)
         }
         .opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
-    }
-}
-
-/// 左栏一行可以拖：按住拖到另一行上放下
-private struct DragReorder: ViewModifier {
-    let id: String
-    let enabled: Bool
-    let onDrop: (String) -> Void
-    @State private var targeted = false
-    func body(content: Content) -> some View {
-        if enabled {
-            content
-                .draggable(id)
-                .dropDestination(for: String.self) { items, _ in
-                    guard let d = items.first else { return false }
-                    onDrop(d); return true
-                } isTargeted: { targeted = $0 }
-                .overlay(alignment: .top) { if targeted { Capsule().fill(Color.brand).frame(height: 2).offset(y: -4) } }
-        } else { content }
     }
 }
