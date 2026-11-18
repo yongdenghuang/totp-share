@@ -171,6 +171,20 @@
     return h('span', { class: 'gpt-dots' }, (recent || []).slice(-8).map(ok => h('i', { class: ok ? 'ok' : 'no' })), (recent || []).length ? null : h('small', { class: 'faint', text: '还没测过' }));
   }
 
+  const day = iso => { const d = new Date(iso); return isNaN(d) ? '' : (d.getMonth() + 1) + '-' + d.getDate(); };
+  // 重置次数（sub2api 每次刷新额度时记下来的）
+  function resetBadge(r) {
+    if (!r) return null;
+    if (!r.known) return h('span', { class: 'gpt-reset unknown', title: '在详情里点「刷新额度」后显示', text: '重置 ?' });
+    const t = r.available ? '重置 ' + r.available + ' 次' : '没有重置次数';
+    const tip = (r.expiresAt || []).map(e => day(e) + ' 到期').join('、') + (r.auto ? (r.expiresAt.length ? '；' : '') + '已开启自动重置' : '');
+    return h('span', { class: 'gpt-reset' + (r.available ? '' : ' none'), title: tip || null, text: t + (r.available && r.expiresAt[0] ? ' · ' + day(r.expiresAt[0]) + ' 到期' : '') + (r.auto ? ' · 自动' : '') });
+  }
+  function resetText(r) {
+    if (!r || !r.known) return '还没刷新过，点上面的「刷新额度」';
+    return (r.available ? r.available + ' 次' : '0 次') + (r.expiresAt.length ? '（' + r.expiresAt.map(e => day(e) + ' 到期').join('、') + '）' : '') + (r.auto ? ' · 已开启自动重置' : '');
+  }
+
   function accountRow(a) {
     const iq = a.iq;
     const status = a.status === 'error' ? h('span', { class: 'neg', text: '出错' }) : !a.schedulable ? h('span', { class: 'warn', text: '已暂停调度' })
@@ -179,7 +193,7 @@
       h('div', { class: 'gpt-who' },
         h('div', null, h('b', { text: a.name || a.email }), a.plan ? h('span', { class: 'gpt-plan-tag', text: a.plan }) : null),
         a.email && a.email !== a.name ? h('button', { class: 'gpt-email', type: 'button', title: '点一下复制', text: a.email, onclick: () => copy(a.email, '邮箱') }) : null,
-        h('div', { class: 'gpt-meta' }, status, a.lastUsedAt ? h('span', { class: 'faint', text: '最近使用 ' + time(a.lastUsedAt) }) : null)),
+        h('div', { class: 'gpt-meta' }, status, resetBadge(a.resets), a.lastUsedAt ? h('span', { class: 'faint', text: '最近使用 ' + time(a.lastUsedAt) }) : null)),
       h('div', { class: 'gpt-iq' },
         h('span', { class: 'gpt-badge ' + iqCls(iq.label), text: iq.label + (iq.label === '降智' && iq.consecutiveFails > 1 ? ' ×' + iq.consecutiveFails : '') }),
         dots(iq.recent)),
@@ -196,7 +210,7 @@
     const kv = (k, v) => v ? [h('span', { class: 'muted', text: k }), h('span', { text: v })] : null;
     setKids(info, kv('账号', a.email), kv('名称', a.name), kv('套餐', a.plan), kv('订阅到期', a.subscriptionExpiresAt && time(a.subscriptionExpiresAt)),
       kv('状态', a.status === 'error' ? '出错：' + a.error : a.schedulable ? '正常调度' : '已暂停调度'),
-      kv('训练数据', a.privacy === 'training_off' ? '已关闭' : a.privacy), kv('额度观测于', a.usageUpdatedAt && time(a.usageUpdatedAt)));
+      kv('训练数据', a.privacy === 'training_off' ? '已关闭' : a.privacy), kv('额度观测于', a.usageUpdatedAt && time(a.usageUpdatedAt)), kv('重置次数', resetText(a.resets)));
     const quotaBox = h('div', { class: 'gpt-quota' }, bar('5 小时', a.fiveHour, 'c5'), bar('7 天', a.sevenDay, 'c7'));
     const quotaInfo = h('div', { class: 'muted small' });
     const hist = h('div', { class: 'gpt-hist' }, h('div', { class: 'faint', text: '加载中…' }));

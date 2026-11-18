@@ -25,7 +25,10 @@ class FakeSub2api:
                 {"id": 7, "name": "plus-01", "status": "active", "schedulable": True,
                  "credentials": {"email": "a@example.com", "plan_type": "plus"},
                  "extra": {"codex_5h_used_percent": 42.5, "codex_5h_reset_at": future,
-                           "codex_7d_used_percent": 80, "codex_7d_reset_at": past}},
+                           "codex_7d_used_percent": 80, "codex_7d_reset_at": past,
+                           "auto_reset_credit_enabled": True,
+                           "codex_reset_credit_snapshot": {"available_count": 2, "credits": [
+                               {"expires_at": "2026-12-12T00:00:00Z"}, {"expires_at": "2026-12-01T00:00:00Z"}]}}},
                 {"id": 8, "name": "pro-01", "status": "error", "error_message": "401", "credentials": {}, "extra": {}}],
                 "total": 2}
         if path.endswith("/states/by-accounts"):
@@ -79,6 +82,9 @@ def test_accounts_summary(ctx, monkeypatch):
     assert a["fiveHour"]["used"] == 42.5 and a["sevenDay"]["used"] == 0          # 已经重置过的窗口当 0
     assert a["iq"]["label"] == "降智" and a["iq"]["consecutiveFails"] == 3
     assert b["iq"]["label"] == "待确认" and b["status"] == "error" and b["fiveHour"]["used"] is None
+    assert a["resets"] == {"known": True, "available": 2, "auto": True,
+                           "expiresAt": ["2026-12-01T00:00:00Z", "2026-12-12T00:00:00Z"]}   # 最早过期的排前面
+    assert b["resets"]["known"] is False and b["resets"]["available"] is None
 
 
 def test_plan_test_and_oauth(ctx, monkeypatch):

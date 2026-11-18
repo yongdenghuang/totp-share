@@ -194,6 +194,7 @@ struct GPTRow: View {
             }
             HStack(spacing: 6) {
                 RecentDots(recent: iq["recent"] as? [Bool] ?? [])
+                ResetTag(r: a.dict("resets"))
                 Spacer()
                 if a.str("status") == "error" { Text("出错").font(.caption.weight(.semibold)).foregroundStyle(Color.bad) }
                 else if !a.bool("schedulable") { Text("已暂停调度").font(.caption).foregroundStyle(Color.warn) }
@@ -201,6 +202,34 @@ struct GPTRow: View {
             }
         }.padding(.vertical, 3)
     }
+}
+
+/// 重置次数（sub2api 刷新额度时记下来的）
+struct ResetTag: View {
+    let r: JSON
+    var body: some View {
+        if r.isEmpty { EmptyView() }
+        else if !r.bool("known") { Text("重置 ?").font(.caption).foregroundStyle(.tertiary) }
+        else if r.int("available") == 0 { Text("没有重置次数").font(.caption).foregroundStyle(.secondary) }
+        else {
+            let first = (r["expiresAt"] as? [String])?.first.map { " · " + monthDay($0) + " 到期" } ?? ""
+            Tag(text: "重置 \(r.int("available")) 次" + first + (r.bool("auto") ? " · 自动" : ""), color: .brand)
+        }
+    }
+}
+
+func monthDay(_ iso: String) -> String {
+    let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let d = f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+    guard let d else { return "" }
+    let c = Calendar.current.dateComponents([.month, .day], from: d)
+    return "\(c.month ?? 0)-\(c.day ?? 0)"
+}
+
+func resetDetail(_ r: JSON) -> String {
+    guard r.bool("known") else { return "还没刷新过，点下面的「刷新额度」" }
+    let exp = (r["expiresAt"] as? [String] ?? []).map { monthDay($0) + " 到期" }
+    return "\(r.int("available")) 次" + (exp.isEmpty ? "" : "（" + exp.joined(separator: "、") + "）") + (r.bool("auto") ? " · 自动重置" : "")
 }
 
 struct QuotaBar: View {
@@ -269,9 +298,9 @@ struct GPTDetail: View {
                     QuotaBar(label: "5 小时", w: a.dict("fiveHour"), color: .brand)
                     QuotaBar(label: "7 天", w: a.dict("sevenDay"), color: .good)
                 }.padding(.vertical, 4)
+                row("重置次数", resetDetail(a.dict("resets")))
                 if let q = quota {
-                    let rc = q.dict("rate_limit_reset_credits"), cr = q.dict("credits")
-                    row("可用重置次数", "\(rc.int("available_count"))")
+                    let cr = q.dict("credits")
                     row("点数余额", cr.bool("unlimited") ? "无限" : cr.str("balance").isEmpty ? "—" : cr.str("balance"))
                     row("当前可用", q.dict("rate_limit").bool("limit_reached") ? "已到上限" : "可以使用")
                 }

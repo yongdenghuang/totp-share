@@ -159,6 +159,19 @@ def install(core):
             pass
         return {"used": round(float(used), 1), "resetAt": reset}
 
+    def resets(extra):
+        """重置次数：sub2api 每次刷新额度后存在 extra.codex_reset_credit_snapshot 里。没刷新过就是 known=False"""
+        snap = extra.get("codex_reset_credit_snapshot")
+        auto = bool(extra.get("auto_reset_credit_enabled"))
+        if not isinstance(snap, dict):
+            return {"known": False, "available": None, "expiresAt": [], "auto": auto}
+        exp = sorted(c.get("expires_at") for c in snap.get("credits") or [] if isinstance(c, dict) and c.get("expires_at"))
+        try:
+            n = int(snap.get("available_count") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        return {"known": True, "available": n, "expiresAt": exp, "auto": auto}
+
     def summarize(a, states):
         cred, extra = a.get("credentials") or {}, a.get("extra") or {}
         candy = next((s for s in states if s.get("account_id") == a.get("id") and s.get("kind") == "candy"), None)
@@ -175,6 +188,7 @@ def install(core):
             "groups": [g.get("name") for g in a.get("groups") or [] if isinstance(g, dict)],
             "fiveHour": pct(extra, "5h"), "sevenDay": pct(extra, "7d"),
             "usageUpdatedAt": extra.get("codex_usage_updated_at") or "",
+            "resets": resets(extra),
             "iq": {
                 # 和 sub2api 列表的「智商状态」一样：只看最近一次糖果题
                 "label": "正常" if last == "pass" else "降智" if last == "quality_fail" else "待确认",
