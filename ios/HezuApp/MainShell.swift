@@ -43,8 +43,38 @@ struct MainTabView: View {
     @StateObject private var komari = KomariStore()
     @StateObject private var layout = LayoutPrefs()
     @State private var tab = "home"
+    @Environment(\.horizontalSizeClass) private var hSize
 
     var body: some View {
+        Group {
+            if hSize == .regular { WideShell() } else { phoneTabs }   // Mac、iPad：左边栏；手机：底部标签
+        }
+        .environmentObject(codes)
+        .environmentObject(vault)
+        .environmentObject(notes)
+        .environmentObject(ledger)
+        .environmentObject(gpt)
+        .environmentObject(komari)
+        .environmentObject(layout)
+        .onAppear { codes.api = api; vault.api = api; notes.api = api; ledger.api = api; gpt.api = api; komari.api = api }
+        .onAppear(perform: sizeMacWindow)
+    }
+
+    /// Mac 版窗口：最小 980×660，第一次打开时给一个电脑上合适的大小
+    private func sizeMacWindow() {
+        guard isMac else { return }
+        DispatchQueue.main.async {
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                scene.sizeRestrictions?.minimumSize = CGSize(width: 980, height: 660)
+                if !UserDefaults.standard.bool(forKey: "mac_window_sized") {
+                    UserDefaults.standard.set(true, forKey: "mac_window_sized")
+                    scene.requestGeometryUpdate(UIWindowScene.GeometryPreferences.Mac(systemFrame: CGRect(x: 120, y: 80, width: 1320, height: 860)))
+                }
+            }
+        }
+    }
+
+    private var phoneTabs: some View {
         TabView(selection: $tab) {
             NavigationStack { HomeView(tab: $tab) }
                 .tabItem { Label("首页", systemImage: "square.grid.2x2") }.tag("home")
@@ -57,14 +87,6 @@ struct MainTabView: View {
                 .tabItem { Label("更多", systemImage: "ellipsis.circle") }.tag("more")
         }
         .tint(.brand)
-        .environmentObject(codes)
-        .environmentObject(vault)
-        .environmentObject(notes)
-        .environmentObject(ledger)
-        .environmentObject(gpt)
-        .environmentObject(komari)
-        .environmentObject(layout)
-        .onAppear { codes.api = api; vault.api = api; notes.api = api; ledger.api = api; gpt.api = api; komari.api = api }
         .onChange(of: layout.tabs) { t in if tab != "home" && tab != "more" && !t.contains(tab) { tab = "home" } }
     }
 

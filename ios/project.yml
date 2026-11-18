@@ -19,7 +19,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hezu.manager
         PRODUCT_NAME: 合租管理
-        TARGETED_DEVICE_FAMILY: "1,2"
+        TARGETED_DEVICE_FAMILY: "1,2,6"   # 6 = Mac 版用 Mac 原生尺寸（不是缩小的 iPad 界面）
         # 同一套代码也能编成 Mac 版（Mac Catalyst）：ios/tools/build-mac.sh
         SUPPORTS_MACCATALYST: YES
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO

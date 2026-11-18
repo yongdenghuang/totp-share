@@ -30,7 +30,12 @@ struct HomeView: View {
     @State private var dragging: String?
     @ObservedObject private var quick = QuickAction.shared
 
-    private let cols = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+    @Environment(\.openModule) private var openModule
+    @Environment(\.horizontalSizeClass) private var hSize
+    /// 手机 3 列；宽屏按宽度自动排（每个方块至少 150 宽）
+    private var cols: [GridItem] {
+        hSize == .regular ? [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 12)] : Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+    }
 
     var body: some View {
         Group {
@@ -91,11 +96,13 @@ struct HomeView: View {
                     }
                 }
                 .onDrop(of: [UTType.text], isTargeted: nil) { _ in dragging = nil; return true }
-                Text("长按方块拖动可以调整顺序").font(.caption).foregroundStyle(.tertiary).frame(maxWidth: .infinity).padding(.top, -8)
+                Text(isMac ? "按住方块拖动可以调整顺序" : "长按方块拖动可以调整顺序").font(.caption).foregroundStyle(.tertiary).frame(maxWidth: .infinity).padding(.top, -8)
                 dueSection
                 if let e = ledger.error { ErrorBanner(message: e) { Task { await ledger.load() } } }
             }
-            .padding(16)
+            .padding(hSize == .regular ? 24 : 16)
+            .frame(maxWidth: hSize == .regular ? 1200 : .infinity)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(.systemGroupedBackground))
         .refreshable { await reloadAll() }
@@ -119,6 +126,7 @@ struct HomeView: View {
     }
     /// 底部标签里有这个模块就切过去，没有就在首页里点进去
     private func open(_ id: String) {
+        if let openModule { openModule(id); return }          // 宽屏：切左栏
         if layout.tabs.contains(id) { tab = id } else { module = id; showModule = true }
     }
 

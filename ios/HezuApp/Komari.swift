@@ -76,6 +76,14 @@ func komariTint(_ n: JSON) -> Color {
 }
 
 // MARK: 视图
+/// 网格里一张卡片的底：和列表里的浅色卡片一样
+func cardBackground(_ color: Color) -> some View {
+    let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+    return shape.fill(Color(.secondarySystemGroupedBackground))
+        .overlay(shape.fill(color.opacity(0.08)))
+        .overlay(shape.strokeBorder(color.opacity(0.22), lineWidth: 0.8))
+        .overlay(alignment: .leading) { Capsule().fill(color.opacity(0.85)).frame(width: 4).padding(.vertical, 12).padding(.leading, 6) }
+}
 /// 一条小进度条
 struct KomariMeter: View {
     let label: String, percent: Double, main: String, sub: String
@@ -166,6 +174,7 @@ struct KomariSection: View {
     @State private var saving = false
     @State private var syncing = false
     @EnvironmentObject var ledger: LedgerStore
+    @Environment(\.horizontalSizeClass) private var hSize
 
     var body: some View {
         if komari.configured == false {
@@ -212,7 +221,18 @@ struct KomariSection: View {
                 }
             } footer: { if let u = URL(string: komari.url), !komari.url.isEmpty { Link("打开 Komari：" + (u.host ?? komari.url), destination: u).font(.caption) } }
             Section {
-                ForEach(ns.indices, id: \.self) { i in KomariCard(n: ns[i]).tintedRow(komariTint(ns[i])) }
+                if hSize == .regular {
+                    // 宽屏：卡片排成网格，和 Komari 首页一样一眼看全
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 12) {
+                        ForEach(ns.indices, id: \.self) { i in
+                            KomariCard(n: ns[i]).padding(.horizontal, 14).padding(.vertical, 8).padding(.leading, 4)
+                                .background(cardBackground(komariTint(ns[i])))
+                        }
+                    }
+                    .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                } else {
+                    ForEach(ns.indices, id: \.self) { i in KomariCard(n: ns[i]).tintedRow(komariTint(ns[i])) }
+                }
             } footer: { Text("每 10 秒刷新一次。VPS 名字和 Komari 节点名字对得上的会自动关联，对不上的在 VPS 详情里手动选。") }
         }
     }
