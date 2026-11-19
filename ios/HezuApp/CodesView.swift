@@ -201,31 +201,35 @@ struct CodesView: View {
     @ViewBuilder
     private func row(_ a: TotpAccount, left: Int) -> some View {
         let code = store.codes[a.id]
-        Button {
-            if let code { toast.copy(code, "已复制验证码") }
-        } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
+        // 一行分三块：点名字复制账号；下面两个小按钮复制账号 / 密码；点右边的数字复制验证码
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Button { toast.copy(a.name, "已复制账号 \(a.name)") } label: {
                     HStack(spacing: 6) {
-                        Text(a.name).font(.body.weight(.medium)).lineLimit(1)
+                        Text(a.name).font(.body.weight(.medium)).lineLimit(1).foregroundStyle(.primary)
                         if a.duplicate { Tag(text: "重名", color: .warn) }
                     }
-                    HStack(spacing: 8) {
-                        if a.hasPassword { HStack(spacing: 3) { Image(systemName: "key.fill").imageScale(.small); Text("有密码") } }
-                        if !a.lastSeen.isEmpty { Text("访问 \(a.lastSeen)") }
-                    }
-                    .font(.caption).foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 8)
+                .buttonStyle(.borderless).tint(.primary)
+                HStack(spacing: 6) {
+                    copyChip("person.fill", "账号") { toast.copy(a.name, "已复制账号 \(a.name)") }
+                    if a.hasPassword { copyChip("key.fill", "密码") { copyPassword(a) } }
+                    if !a.lastSeen.isEmpty { Text("访问 \(a.lastSeen)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                }
+            }
+            Spacer(minLength: 8)
+            Button { if let code { toast.copy(code, "已复制验证码") } } label: {
                 Text(code.map { String($0.prefix(3)) + " " + String($0.dropFirst(3)) } ?? "··· ···")
                     .font(.system(size: 24, weight: .semibold, design: .monospaced))
                     .foregroundStyle(left <= 5 ? Color.bad : Color.brand)
                     .contentTransition(.numericText())
+                    .padding(.vertical, 6).padding(.leading, 10)
+                    .contentShape(Rectangle())
             }
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
+            .buttonStyle(.borderless)
+            .accessibilityLabel("复制验证码")
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 4)
         .swipeActions(edge: .trailing) {
             if a.hasPassword {
                 Button { copyPassword(a) } label: { Label("复制密码", systemImage: "key") }.tint(.brand)
@@ -255,6 +259,19 @@ struct CodesView: View {
         Button { webPage = WebPage(title: "编辑 \(a.name)", path: "/admin/accounts/\(a.id)/edit") } label: { Label("编辑密钥 / 分享密码…", systemImage: "slider.horizontal.3") }
         Divider()
         Button(role: .destructive) { confirmDelete = a } label: { Label("删除", systemImage: "trash") }
+    }
+
+    /// 小胶囊按钮：「👤 账号」「🔑 密码」
+    private func copyChip(_ icon: String, _ title: String, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            HStack(spacing: 3) { Image(systemName: icon).imageScale(.small); Text(title) }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(Color.brand.opacity(0.12), in: Capsule())
+                .foregroundStyle(Color.brand)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("复制" + title)
     }
 
     private func copyPassword(_ a: TotpAccount) {
