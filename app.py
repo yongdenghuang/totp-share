@@ -363,6 +363,16 @@ def login_required(f):
         return f(*a, **kw)
     return wrapper
 
+# 网站图标（书签栏、浏览器标签、手机桌面），和 App 图标一样是紫底白「租」
+@app.route("/favicon.ico")
+def favicon():
+    return app.send_static_file("favicon.ico"), 200, {"Cache-Control": "public, max-age=604800"}
+
+@app.route("/apple-touch-icon.png")
+@app.route("/apple-touch-icon-precomposed.png")
+def apple_touch_icon():
+    return app.send_static_file("apple-touch-icon.png"), 200, {"Cache-Control": "public, max-age=604800"}
+
 @app.route("/")
 def index():
     return redirect(url_for("admin_root"))
