@@ -63,7 +63,9 @@ struct RowEditor: View {
                     if linked != nil { Text("名称和分组会和验证码账号保持一致，改了两边一起变。") }
                 }
 
-                if mode != "resale" {
+                if mode == "accounts" {
+                    // 只存账号：没有续费、收费
+                } else if mode != "resale" {
                     Section("续费") {
                         Toggle("续费日期", isOn: $hasRenew.animation())
                         if hasRenew {
@@ -77,6 +79,7 @@ struct RowEditor: View {
                 }
 
                 switch mode {
+                case "accounts": EmptyView()
                 case "members": membersSection
                 case "resale":
                     Section {
@@ -93,16 +96,16 @@ struct RowEditor: View {
                     }
                 }
 
-                if mode != "resale" {
+                if mode != "resale" && mode != "accounts" {
                     Section { numField("续费成本", $cost) }
                 }
 
-                Section {
+                if mode != "accounts" { Section {
                     let inc = income, c = costValue
                     HStack { Text("收费"); Spacer(); Text(money(inc)).monospacedDigit() }
                     HStack { Text("成本"); Spacer(); Text(money(c)).monospacedDigit() }
                     HStack { Text("利润").fontWeight(.semibold); Spacer(); Text(money(inc - c)).fontWeight(.semibold).foregroundStyle(inc - c >= 0 ? Color.good : Color.bad).monospacedDigit() }
-                }
+                } }
 
                 Section {
                     TextField("备注", text: $note, axis: .vertical).lineLimit(1...4)

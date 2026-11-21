@@ -62,7 +62,7 @@ extension Dictionary where Key == String, Value == Any {
     }
 }
 
-let modeNames: [(String, String)] = [("unit", "单价 × 人数（每人价格一样）"), ("members", "每人单独填金额"), ("resale", "代充（售价、成本固定，只填数量）")]
+let modeNames: [(String, String)] = [("unit", "单价 × 人数（每人价格一样）"), ("members", "每人单独填金额"), ("resale", "代充（售价、成本固定，只填数量）"), ("accounts", "只存账号（账号、密码、验证码，不算钱）")]
 
 /// 新建 / 修改一张表
 struct SheetForm: View {

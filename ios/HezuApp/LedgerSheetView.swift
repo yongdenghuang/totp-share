@@ -40,7 +40,7 @@ struct LedgerSheetView: View {
 
     var body: some View {
         List {
-            Section { summary }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+            if mode != "accounts" { Section { summary }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear) }
             if ledger.isArchived(month) {
                 Section {
                     HStack {
@@ -176,7 +176,7 @@ struct LedgerSheetView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 chip("全部 \(allRows.count)", nil, groupFilter == nil) { groupFilter = nil }
-                ForEach(ledger.groups) { g in
+                ForEach(ledger.visibleGroups) { g in
                     let n = allRows.filter { $0.str("group") == g.id }.count
                     chip(n > 0 ? "\(g.name) \(n)" : g.name, Color(hex: g.color), groupFilter == g.id) { groupFilter = groupFilter == g.id ? nil : g.id }
                 }
@@ -209,7 +209,7 @@ struct LedgerSheetView: View {
         }
         guard grouped else { return list.isEmpty ? [] : [Sec(key: "all", title: sheet.str("name"), color: nil, groupID: nil, rows: list)] }
         var out: [Sec] = []
-        for g in ledger.groups where groupFilter == nil || groupFilter == g.id {
+        for g in ledger.visibleGroups where groupFilter == nil || groupFilter == g.id {
             let l = list.filter { $0.str("group") == g.id }
             if !l.isEmpty || groupFilter == g.id { out.append(Sec(key: g.id, title: g.name, color: Color(hex: g.color), groupID: g.id, rows: l)) }
         }
@@ -226,9 +226,9 @@ struct LedgerSheetView: View {
         return HStack(spacing: 6) {
             if let c = sec.color { Circle().fill(c).frame(width: 8, height: 8) }
             Text(sec.title)
-            Text(mode == "resale" ? "\(sec.rows.count) 项 · \(plainNum(s.heads)) 单" : "\(sec.rows.count) 个 · \(plainNum(s.heads)) 人").foregroundStyle(.tertiary)
+            Text(mode == "accounts" ? "\(sec.rows.count) 个账号" : mode == "resale" ? "\(sec.rows.count) 项 · \(plainNum(s.heads)) 单" : "\(sec.rows.count) 个 · \(plainNum(s.heads)) 人").foregroundStyle(.tertiary)
             Spacer()
-            Text(money(s.profit)).foregroundStyle(s.profit >= 0 ? Color.good : Color.bad).fontWeight(.semibold)
+            if mode != "accounts" { Text(money(s.profit)).foregroundStyle(s.profit >= 0 ? Color.good : Color.bad).fontWeight(.semibold) }
         }
         .textCase(nil)
     }
@@ -334,11 +334,14 @@ struct LedgerRowView: View {
                     }.buttonStyle(.borderless)
                 }
                 Spacer(minLength: 4)
-                Text(money(profit)).font(.subheadline.weight(.semibold)).monospacedDigit()
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background((profit >= 0 ? Color.good : Color.bad).opacity(0.12), in: Capsule())
-                    .foregroundStyle(profit >= 0 ? Color.good : Color.bad)
+                if mode != "accounts" {
+                    Text(money(profit)).font(.subheadline.weight(.semibold)).monospacedDigit()
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .background((profit >= 0 ? Color.good : Color.bad).opacity(0.12), in: Capsule())
+                        .foregroundStyle(profit >= 0 ? Color.good : Color.bad)
+                }
             }
+            if mode == "accounts" { accountChips }
             HStack(spacing: 8) {
                 if mode != "resale", let d = daysUntil(row.str("renew")) {
                     let soon = d <= 3 && !stopped && !ledger.isArchived(month)
@@ -353,7 +356,7 @@ struct LedgerRowView: View {
                 if stopped { Text("已停止").foregroundStyle(Color.warn) }
             }
             .font(.caption)
-            charge(inc: inc, cost: cost)
+            if mode != "accounts" { charge(inc: inc, cost: cost) }
             if !row.str("note").isEmpty { Text(row.str("note")).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
         }
         .padding(.vertical, 4)
@@ -401,6 +404,28 @@ struct LedgerRowView: View {
         default:
             Text("\(money(num(row["unitPrice"]))) × \(plainNum(num(row["count"]))) 人 = \(money(inc)) · 成本 \(money(cost))").font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// 「只存账号」表：复制账号、复制密码
+    @ViewBuilder private var accountChips: some View {
+        let totp = codes.accounts.first { $0.id == row.int("totpId") }
+        HStack(spacing: 6) {
+            chip("person.fill", "账号") { toast.copy(row.str("account"), "已复制账号") }
+            if !row.str("password").isEmpty {
+                chip("key.fill", "密码") { toast.copy(row.str("password"), "已复制密码") }
+            } else if let totp, totp.hasPassword {
+                chip("key.fill", "密码") { Task { do { toast.copy(try await codes.password(totp), "已复制密码") } catch { toast.show(error.localizedDescription) } } }
+            }
+        }
+    }
+    private func chip(_ icon: String, _ title: String, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            HStack(spacing: 3) { Image(systemName: icon).imageScale(.small); Text(title) }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(Color.brand.opacity(0.12), in: Capsule())
+                .foregroundStyle(Color.brand)
+        }.buttonStyle(.borderless)
     }
 
     private func togglePaid(_ i: Int) {

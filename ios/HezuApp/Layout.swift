@@ -92,8 +92,8 @@ func moduleInfo(_ id: String, ledger: LedgerStore, codes: CodesStore, vault: Vau
     default:
         let sid = String(id.dropFirst(6))
         guard let s = ledger.sheetInfo.first(where: { $0.id == sid }) else { return ModuleInfo(title: "已删除的表", sub: "", icon: "questionmark", color: .gray) }
-        return ModuleInfo(title: s.name, sub: s.mode == "resale" ? "\(s.rows) 个项目" : "\(s.rows) 个号",
-                          icon: s.grouped ? "person.2.fill" : s.mode == "resale" ? "bolt.fill" : "play.rectangle.fill", color: purple)
+        return ModuleInfo(title: s.name, sub: s.mode == "resale" ? "\(s.rows) 个项目" : s.mode == "accounts" ? "\(s.rows) 个账号" : "\(s.rows) 个号",
+                          icon: s.grouped ? "person.2.fill" : s.mode == "resale" ? "bolt.fill" : s.mode == "accounts" ? "person.crop.rectangle.stack.fill" : "play.rectangle.fill", color: purple)
     }
 }
 

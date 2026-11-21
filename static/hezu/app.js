@@ -244,7 +244,10 @@
     const skip = new Set(S.totpSkip), have = new Set();
     for (const sh of S.sheets) for (const r of M.rows[sh.id]) if (r.totpId > 0) have.add(r.totpId);
     for (const a of A) if (!have.has(a.id) && !skip.has(a.id)) {
-      M.rows[sheet.id].push(fixRow({ account: a.name, group: groupIdByName(a.group), totpId: a.id })); n++;
+      const own = sheetForGroup(a.group);   // 这个分组归「只存账号」表的，加到那张表里
+      if (own) M.rows[own.id].push(fixRow({ account: a.name, totpId: a.id }));
+      else M.rows[sheet.id].push(fixRow({ account: a.name, group: groupIdByName(a.group), totpId: a.id }));
+      n++;
     }
     return n > 0;
   }
@@ -317,9 +320,14 @@
   function tagObj(t) { return typeof t === 'object' && t ? { name: String(t.name || '').trim(), url: String(t.url || '').trim() } : { name: String(t || '').trim(), url: '' }; }
   const tagNames = v => (v.tags || []).map(t => tagObj(t).name);
   // 表的收费方式：members = 每人单独填金额；unit = 单价 × 人数；resale = 代充（售价、成本/份固定，按数量算）
-  function rowCost(sheet, r) { return sheet.mode === 'resale' ? num(r.unitCost) * num(r.count) : num(r.cost); }
-  function income(sheet, r) { return sheet.mode === 'members' ? r.members.reduce((a, m) => a + num(m.amount), 0) : num(r.unitPrice) * num(r.count); }
-  function heads(sheet, r) { return sheet.mode === 'members' ? r.members.length : num(r.count); }
+  // accounts = 只存账号（账号、密码、验证码、备注），不算钱，也不进总览的收费 / 利润
+  function rowCost(sheet, r) { return sheet.mode === 'accounts' ? 0 : sheet.mode === 'resale' ? num(r.unitCost) * num(r.count) : num(r.cost); }
+  function income(sheet, r) { return sheet.mode === 'accounts' ? 0 : sheet.mode === 'members' ? r.members.reduce((a, m) => a + num(m.amount), 0) : num(r.unitPrice) * num(r.count); }
+  function heads(sheet, r) { return sheet.mode === 'accounts' ? 0 : sheet.mode === 'members' ? r.members.length : num(r.count); }
+  // 「只存账号」表可以认领一个验证码分组（totpGroup）：这个分组的账号归它，不再出现在 AI 合租里
+  const ownedGroupNames = () => new Set(S.sheets.filter(x => x.mode === 'accounts' && x.totpGroup).map(x => x.totpGroup));
+  const visibleGroups = () => { const own = ownedGroupNames(); return G.filter(g => !own.has(g.name)); };
+  const sheetForGroup = name => S.sheets.find(x => x.mode === 'accounts' && x.totpGroup && x.totpGroup === name) || null;
   const zero = () => ({ n: 0, heads: 0, income: 0, cost: 0, profit: 0 });
   function stats(sheet, rows) {
     const s = zero();
@@ -332,10 +340,11 @@
   function breakdown(ym) {
     const M = S.months[ym], out = [];
     for (const sh of S.sheets) {
+      if (sh.mode === 'accounts') continue;
       const rows = (M.rows[sh.id] || []);
       if (sh.grouped) {
         const ids = new Set(G.map(g => g.id));
-        for (const g of G) out.push({ key: 'g:' + g.id, label: g.name, color: g.color, text: g.text, sheet: sh.id, rows: rows.filter(r => r.group === g.id).length, st: stats(sh, rows.filter(r => r.group === g.id)) });
+        for (const g of visibleGroups()) out.push({ key: 'g:' + g.id, label: g.name, color: g.color, text: g.text, sheet: sh.id, rows: rows.filter(r => r.group === g.id).length, st: stats(sh, rows.filter(r => r.group === g.id)) });
         const loose = rows.filter(r => !ids.has(r.group));
         if (loose.length) out.push({ key: 'loose:' + sh.id, label: '未分组', color: LOOSE.color, text: LOOSE.text, sheet: sh.id, rows: loose.length, st: stats(sh, loose) });
       } else out.push({ key: 's:' + sh.id, label: sh.name, color: null, sheet: sh.id, rows: rows.length, st: stats(sh, rows) });
@@ -963,8 +972,21 @@
     searchRows.push({ tr, row });
     return tr;
   }
+  function accountsRowEl(sheet, rows, row, editable) {
+    const acct = copyField(row, 'account', { plain: true, ro: !editable, placeholder: '账号', label: '账号', title: '点一下复制账号',
+      onChange: () => { if (row.totpId > 0 && totpById(row.totpId)) pushName(row); else if (linkTotp()) { touch(); render(); } } });
+    const tr = h('tr', { class: row.stopped ? 'stopped' : '' },
+      h('td', null, h('div', { class: 'acct' }, acct, totpChip(row))),
+      h('td', null, pwField(row, editable)),
+      h('td', null, cell(row, 'note', { ro: !editable, label: '备注', placeholder: '备注' })),
+      h('td', null, editable ? h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => rowMenu(e.currentTarget, sheet, rows, row) }, icon('more')) : null));
+    tr.dataset.row = row.id;
+    searchRows.push({ tr, row });
+    return tr;
+  }
   function rowEl(sheet, rows, row, editable, live) {
     if (sheet.mode === 'resale') return resaleRowEl(sheet, rows, row, editable);
+    if (sheet.mode === 'accounts') return accountsRowEl(sheet, rows, row, editable);
     const inc = h('td', { class: 'calc r' }), pill = h('span', { class: 'profit' }), prof = h('td', { class: 'calc r' }, pill);
     updaters.push(() => { const v = income(sheet, row); inc.textContent = money(v); profitText(pill, v - rowCost(sheet, row)); });
     const acct = copyField(row, 'account', { plain: true, ro: !editable, placeholder: '账号', label: '账号',
@@ -1002,6 +1024,13 @@
         h('thead', null, h('tr', null, rc.map(c => h('th', { class: c[2] ? 'r' : '', text: c[0] })))),
         h('tbody', null, list.map(r => tinted(rowEl(sheet, rows, r, editable, live), rowTint(sheet, r))))));
     }
+    if (sheet.mode === 'accounts') {
+      const ac = [['账号', 0], ['账号密码', 150], ['备注', 260], ['', 42]];
+      return h('div', { class: 'scroll' }, h('table', { class: 'grid accounts', style: 'min-width:720px;table-layout:fixed' },
+        h('colgroup', null, ac.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
+        h('thead', null, h('tr', null, ac.map((c, i) => h('th', null, i === 0 && list.some(r => r.totpId > 0 && totpById(r.totpId)) ? codeTimerHead(c[0]) : c[0])))),
+        h('tbody', null, list.map(r => tinted(rowEl(sheet, rows, r, editable, live), rowTint(sheet, r))))));
+    }
     const cols = sheet.mode === 'members'
       ? [['账号', 240], ['账号密码', 112]].concat([['续费日期', 134], ['续费卡信息', 126], ['卡号', 118], ['收费情况（每人）', 0], ['收费', 76, 1], ['续费成本', 78, 1], ['利润', 92, 1], ['备注', 88], ['', 42]])
       : [['账号', 220], ['账号密码', 112], ['续费日期', 136], ['续费卡信息', 136], ['卡号', 116], ['单价', 84, 1], ['人数', 70, 2], ['收费', 92, 1], ['续费成本', 92, 1], ['利润', 100, 1], ['备注', 0], ['', 42]];
@@ -1014,12 +1043,13 @@
     const list = rows.filter(filter), key = sheet.id + ':' + (group ? group.id || 'loose' : 'all');
     const closed = !!collapsed[key];
     const sum = h('div', { class: 'group-sum' });
-    updaters.push(() => {
+    if (sheet.mode !== 'accounts') updaters.push(() => {
       const s = stats(sheet, rows.filter(filter));
       setKids(sum, h('span', null, '收费 ', h('b', { text: money(s.income) })), h('span', null, '成本 ', h('b', { text: money(s.cost) })), profitPill(s.profit));
     });
+    else sum.textContent = '点账号复制账号，点验证码复制验证码';
     const count = h('span', { class: 'pill' });
-    updaters.push(() => { const s = stats(sheet, rows.filter(filter)); count.textContent = sheet.mode === 'resale' ? list.length + ' 个项目 · ' + plain(s.heads) + ' 单' : list.length + ' 个账号 · ' + plain(s.heads) + ' 人'; });
+    updaters.push(() => { const s = stats(sheet, rows.filter(filter)); count.textContent = sheet.mode === 'accounts' ? list.length + ' 个账号' : sheet.mode === 'resale' ? list.length + ' 个项目 · ' + plain(s.heads) + ' 单' : list.length + ' 个账号 · ' + plain(s.heads) + ' 人'; });
     const toggle = () => { collapsed[key] = !closed; try { localStorage.setItem('hezu-collapsed', JSON.stringify(collapsed)); } catch (e) { /* 忽略 */ } render(); };
     const title = h('button', { class: 'group-title', type: 'button', 'aria-expanded': String(!closed), title: closed ? '展开' : '收起', onclick: toggle },
       h('span', { class: 'chev' }, icon('chev', 16)), group ? h('span', { class: 'dot', style: 'background:' + group.color }) : null, h('span', { text: group ? group.name : sheet.name }));
@@ -1051,7 +1081,7 @@
   }
   function sheetView(sheet) {
     const M = S.months[view.month], rows = M.rows[sheet.id], editable = isEditable(), live = view.month === latestMonth() && !M.archived;
-    const out = [tiles(() => stats(sheet, rows), sheet.mode === 'resale')];
+    const out = sheet.mode === 'accounts' ? [] : [tiles(() => stats(sheet, rows), sheet.mode === 'resale')];
     const q = h('input', { type: 'search', placeholder: '搜索账号、备注、卡种', value: view.q, 'aria-label': '搜索' });
     q.addEventListener('input', () => { view.q = q.value; applySearch(); });
     const bar = h('div', { class: 'toolbar' }, h('label', { class: 'search' }, icon('search', 15), q));
@@ -1060,7 +1090,7 @@
     out.push(bar);
     if (sheet.grouped) {
       const ids = new Set(G.map(g => g.id)), f = view.gfilter;
-      G.forEach(g => { if (f === null || f === g.id) out.push(section(sheet, rows, g, r => r.group === g.id, editable, live)); });
+      visibleGroups().forEach(g => { if (f === null || f === g.id) out.push(section(sheet, rows, g, r => r.group === g.id, editable, live)); });
       if ((f === null || f === '__loose') && rows.some(r => !ids.has(r.group))) out.push(section(sheet, rows, LOOSE, r => !ids.has(r.group), editable, live));
       if (!G.length) out.push(h('div', { class: 'empty', text: '还没有分组，点上面的“管理分组”新建。' }));
     } else out.push(section(sheet, rows, null, () => true, editable, live));
@@ -1070,14 +1100,15 @@
   // ---------- 添加账号：账本记录和验证码账号统一从这里加 ----------
   async function addAccountDialog(preset) {
     preset = preset || {};
-    if (preset.sheet && !preset.sheet.grouped) return addRowDialog(preset.sheet);
+    if (preset.sheet && preset.sheet.mode === 'accounts' && !preset.group) preset.group = G.find(g => g.name === preset.sheet.totpGroup) || null;
+    if (preset.sheet && !preset.sheet.grouped && preset.sheet.mode !== 'accounts') return addRowDialog(preset.sheet);
     const name = h('input', { type: 'text', placeholder: '账号邮箱或名称', autocomplete: 'off', spellcheck: false });
     const groupSel = h('select', null, h('option', { value: '', text: '未分组' }), G.map(g => h('option', { value: g.id, text: g.name, selected: !!preset.group && g.id === preset.group.id })));
     const secret = h('input', { type: 'text', placeholder: '没开两步验证就留空', autocomplete: 'off', spellcheck: false });
     const password = h('input', { type: 'text', placeholder: '可不填；加密保存在验证码账号里', autocomplete: 'off', spellcheck: false });
     const toLedger = h('input', { type: 'checkbox', checked: true });
     // 只有分组表（AI 合租）的账号会关联验证码，所以只在这类表之间选
-    const ledgerSheets = S.sheets.filter(s => s.grouped);
+    const ledgerSheets = S.sheets.filter(s => s.grouped || s.mode === 'accounts');
     const sheetSel = h('select', null, ledgerSheets.map(s => h('option', { value: s.id, text: s.name, selected: !!preset.sheet && s.id === preset.sheet.id })));
     const fSheet = h('label', { class: 'field', hidden: ledgerSheets.length < 2 }, '记到哪张表', sheetSel);
     const err = h('div', { class: 'neg' });
@@ -1104,8 +1135,10 @@
         if (!toLedger.checked) touch();
       }
       if (toLedger.checked && sheet) {
-        made = fixRow({ account: n, group: sheet.grouped && g ? g.id : '', totpId });
-        S.months[view.month].rows[sheet.id].push(made);
+        const dest = (g && sheetForGroup(g.name)) || sheet;   // 选的分组归「只存账号」表的，就记到那张表
+        made = fixRow({ account: n, group: dest.grouped && g ? g.id : '', totpId });
+        S.months[view.month].rows[dest.id].push(made);
+        view.tab = dest.id;
         view.tab = sheet.id; view.q = '';
         if (!totpId) linkTotp();   // 没填密钥但验证码那边已有同名账号：直接关联上
         touch();
@@ -1140,7 +1173,7 @@
       return b;
     };
     box.append(chip('全部', null, rows.length));
-    G.forEach(g => box.append(chip(g.name, g.id, counts[g.id] || 0, g)));
+    visibleGroups().forEach(g => box.append(chip(g.name, g.id, counts[g.id] || 0, g)));
     if (loose) box.append(chip('未分组', '__loose', loose));
     box.append(h('button', { class: 'btn ghost small', type: 'button', text: G.length ? '管理分组' : '＋ 新建分组', onclick: e => groupsMenu(e.currentTarget) }));
     return box;
@@ -1254,12 +1287,17 @@
     const mode = h('select', null,
       h('option', { value: 'unit', text: '单价 × 人数（每人价格一样）', selected: !sheet || sheet.mode === 'unit' }),
       h('option', { value: 'members', text: '每人单独填金额', selected: !!sheet && sheet.mode === 'members' }),
-      h('option', { value: 'resale', text: '代充（售价、成本固定，只填每月数量）', selected: !!sheet && sheet.mode === 'resale' }));
-    const ok = await dialog(sheet ? '修改表' : '新建表', [h('label', { class: 'field' }, '名称', name), h('label', { class: 'field' }, '收费方式', mode)],
+      h('option', { value: 'resale', text: '代充（售价、成本固定，只填每月数量）', selected: !!sheet && sheet.mode === 'resale' }),
+      h('option', { value: 'accounts', text: '只存账号（账号、密码、验证码，不算钱）', selected: !!sheet && sheet.mode === 'accounts' }));
+    const grp = h('select', null, h('option', { value: '', text: '不认领' }), G.map(g => h('option', { value: g.name, text: g.name, selected: !!sheet && sheet.totpGroup === g.name })));
+    const fGrp = h('label', { class: 'field', hidden: mode.value !== 'accounts' }, '这个验证码分组的账号放到这张表', grp);
+    mode.addEventListener('change', () => { fGrp.hidden = mode.value !== 'accounts'; });
+    const ok = await dialog(sheet ? '修改表' : '新建表', [h('label', { class: 'field' }, '名称', name), h('label', { class: 'field' }, '收费方式', mode), fGrp],
       [{ text: '取消' }, { text: sheet ? '保存' : '新建', cls: 'primary', value: true, run: () => { if (!name.value.trim()) { name.focus(); return false; } } }]);
     if (!ok) return;
     if (sheet) { convertSheetMode(sheet, mode.value); sheet.name = name.value.trim(); sheet.mode = mode.value; }
     else { sheet = { id: 's_' + uid(), name: name.value.trim(), mode: mode.value }; S.sheets.push(sheet); view.tab = sheet.id; }
+    if (mode.value === 'accounts' && grp.value) sheet.totpGroup = grp.value; else delete sheet.totpGroup;
     normalize(); touch(); render();
   }
   // 换收费方式时把还在进行的月份的数据换算过去（存档月份保持原样）

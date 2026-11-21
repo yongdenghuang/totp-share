@@ -106,14 +106,18 @@ final class LedgerStore: ObservableObject {
 
 // MARK: - 计算（和网页 app.js 一致）
 enum Calc {
+    // accounts = 只存账号（账号、密码、验证码），不算钱
     static func income(_ mode: String, _ r: JSON) -> Double {
-        mode == "members" ? r.list("members").reduce(0) { $0 + num($1["amount"]) } : num(r["unitPrice"]) * num(r["count"])
+        if mode == "accounts" { return 0 }
+        return mode == "members" ? r.list("members").reduce(0) { $0 + num($1["amount"]) } : num(r["unitPrice"]) * num(r["count"])
     }
     static func cost(_ mode: String, _ r: JSON) -> Double {
-        mode == "resale" ? num(r["unitCost"]) * num(r["count"]) : num(r["cost"])
+        if mode == "accounts" { return 0 }
+        return mode == "resale" ? num(r["unitCost"]) * num(r["count"]) : num(r["cost"])
     }
     static func heads(_ mode: String, _ r: JSON) -> Double {
-        mode == "members" ? Double(r.list("members").count) : num(r["count"])
+        if mode == "accounts" { return 0 }
+        return mode == "members" ? Double(r.list("members").count) : num(r["count"])
     }
     struct Stats { var n = 0; var heads = 0.0; var income = 0.0; var cost = 0.0; var profit: Double { income - cost } }
     static func stats(_ mode: String, _ rows: [JSON]) -> Stats {
@@ -261,11 +265,16 @@ struct DueItem: Identifiable { let id: String; let days: Int; let title: String;
 extension LedgerStore {
     var monthTotal: Calc.Stats {
         var t = Calc.Stats()
-        for sh in sheets {
+        for sh in sheets where sh.str("mode") != "accounts" {
             let s = Calc.stats(sh.str("mode"), rows(latestMonth, sh.str("id")))
             t.n += s.n; t.heads += s.heads; t.income += s.income; t.cost += s.cost
         }
         return t
+    }
+    /// 被「只存账号」表认领的验证码分组：不再在 AI 合租里显示
+    var visibleGroups: [LGroup] {
+        let own = Set(sheets.filter { $0.str("mode") == "accounts" }.map { $0.str("totpGroup") }.filter { !$0.isEmpty })
+        return groups.filter { !own.contains($0.name) }
     }
     var sheetInfo: [SheetInfo] {
         sheets.map { SheetInfo(id: $0.str("id"), name: $0.str("name"), mode: $0.str("mode"), grouped: $0.bool("grouped"), rows: rows(latestMonth, $0.str("id")).count) }
