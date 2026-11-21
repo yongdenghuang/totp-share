@@ -974,15 +974,24 @@
   }
   // AdsPower 成员的登录设备数量（只读；数据由 /api/app/adspower/devices 提供，按账号邮箱对上）
   let ADS = null, adsLoading = null;
+  const adsUpdatedText = () => ADS && ADS.updated ? '更新于 ' + new Date(ADS.updated * 1000).toLocaleString('zh-CN', { hour12: false }) : '';
+  function showDevices(row) {
+    const key = String(row.account || '').trim().toLowerCase(), list = (ADS && ADS.devices && ADS.devices[key]) || [];
+    const body = list.length ? h('ul', { class: 'dev-list' }, list.map(d => h('li', null,
+      h('div', { class: 'dev-top' }, h('b', { text: d.name || '未知设备' }), h('span', { class: 'dev-time', text: d.time || '' })),
+      h('div', { class: 'dev-sub', text: [d.ip, d.region].filter(Boolean).join(' · ') }))))
+      : h('p', { class: 'muted', text: ADS && ADS.counts && ADS.counts[key] === 0 ? '没有登录中的设备。' : '这次只记了数量，没有设备明细。' });
+    dialog('登录设备 · ' + (row.account || ''), [body, h('p', { class: 'dev-note', text: adsUpdatedText() + (adsUpdatedText() ? ' · ' : '') + '数据来自 AdsPower「团队管理 → 登录活动」' })], [{ text: '关闭', cls: 'primary' }]);
+  }
   function devChip(row) {
-    const el = h('span', { class: 'dev-chip', hidden: true });
+    const el = h('button', { class: 'dev-chip', type: 'button', hidden: true, onclick: () => showDevices(row) });
     const paint = () => {
       const n = ADS && ADS.counts ? ADS.counts[String(row.account || '').trim().toLowerCase()] : undefined;
       el.hidden = n === undefined;
       if (n === undefined) return;
       el.textContent = n + ' 台';
       el.className = 'dev-chip' + (n === 0 ? ' zero' : '');
-      el.title = 'AdsPower 登录设备 ' + n + ' 台' + (ADS.updated ? ' · 更新于 ' + new Date(ADS.updated * 1000).toLocaleString('zh-CN', { hour12: false }) : '');
+      el.title = 'AdsPower 登录设备 ' + n + ' 台，点一下看明细' + (ADS.updated ? ' · ' + adsUpdatedText() : '');
     };
     if (ADS) paint();
     else {

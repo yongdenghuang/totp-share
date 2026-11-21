@@ -21,6 +21,8 @@ final class LedgerStore: ObservableObject {
     @Published var saving = false
     @Published var rates: Double?            // 1 美元 = 多少人民币
     @Published var adsDevices: [String: Int] = [:]   // AdsPower 成员邮箱（小写）→ 登录设备数量
+    @Published var adsDetails: [String: [JSON]] = [:] // 邮箱 → 每台设备 {name, ip, region, time}
+    @Published var adsUpdated: Double = 0
     private var rev = 0
     private var queue: Task<Void, Never>?
 
@@ -51,7 +53,12 @@ final class LedgerStore: ObservableObject {
         var m: [String: Int] = [:]
         for (k, v) in d.dict("counts") { if let n = (v as? Int) ?? (v as? NSNumber)?.intValue { m[k] = n } }
         adsDevices = m
+        var det: [String: [JSON]] = [:]
+        for (k, v) in d.dict("devices") { det[k] = (v as? [JSON]) ?? [] }
+        adsDetails = det
+        adsUpdated = (d["updated"] as? Double) ?? (d["updated"] as? NSNumber)?.doubleValue ?? 0
     }
+    func adsDeviceList(_ account: String) -> [JSON] { adsDetails[account.trimmingCharacters(in: .whitespaces).lowercased()] ?? [] }
     func adsDeviceCount(_ account: String) -> Int? { adsDevices[account.trimmingCharacters(in: .whitespaces).lowercased()] }
 
     // MARK: 保存

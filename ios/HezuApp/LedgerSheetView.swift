@@ -319,6 +319,7 @@ struct LedgerRowView: View {
     @EnvironmentObject var ledger: LedgerStore
     @EnvironmentObject var codes: CodesStore
     @EnvironmentObject var toast: Toast
+    @State private var showDevices = false
 
     var body: some View {
         let inc = Calc.income(mode, row), cost = Calc.cost(mode, row), profit = inc - cost
@@ -418,12 +419,16 @@ struct LedgerRowView: View {
                 chip("key.fill", "密码") { Task { do { toast.copy(try await codes.password(totp), "已复制密码") } catch { toast.show(error.localizedDescription) } } }
             }
             if let n = ledger.adsDeviceCount(row.str("account")) {
-                Label("\(n) 台", systemImage: "desktopcomputer")
-                    .font(.caption.weight(.semibold)).monospacedDigit()
-                    .padding(.horizontal, 9).padding(.vertical, 4)
-                    .background((n == 0 ? Color.gray : Color.blue).opacity(0.12), in: Capsule())
-                    .foregroundStyle(n == 0 ? Color.secondary : Color.blue)
-                    .accessibilityLabel("登录设备 \(n) 台")
+                Button { showDevices = true } label: {
+                    Label("\(n) 台", systemImage: "desktopcomputer")
+                        .font(.caption.weight(.semibold)).monospacedDigit()
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background((n == 0 ? Color.gray : Color.blue).opacity(0.12), in: Capsule())
+                        .foregroundStyle(n == 0 ? Color.secondary : Color.blue)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("登录设备 \(n) 台，点开看明细")
+                .sheet(isPresented: $showDevices) { AdsDevicesSheet(account: row.str("account")) }
             }
         }
     }
@@ -450,5 +455,57 @@ struct LedgerRowView: View {
         let id = row.str("id")
         ledger.edit { $0.updateRow(month, sheetID, id) { r in r["count"] = max(0, num(r["count"]) + d) } }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+}
+
+
+/// AdsPower 某个成员的登录设备明细（点「N 台」打开）
+struct AdsDevicesSheet: View {
+    let account: String
+    @EnvironmentObject var ledger: LedgerStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let list = ledger.adsDeviceList(account)
+        NavigationStack {
+            List {
+                Section {
+                    if list.isEmpty {
+                        Text(ledger.adsDeviceCount(account) == 0 ? "没有登录中的设备。" : "这次只记了数量，没有设备明细。")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(Array(list.enumerated()), id: \.offset) { _, d in
+                        let name = d.str("name")
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: icon(name)).font(.title3).foregroundStyle(.blue).frame(width: 28)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(name.isEmpty ? "未知设备" : name).font(.body.weight(.semibold))
+                                Text([d.str("ip"), d.str("region")].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
+                            Spacer(minLength: 8)
+                            Text(d.str("time")).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                } header: {
+                    Text(account).textCase(nil)
+                } footer: {
+                    Text((ledger.adsUpdated > 0 ? "更新于 " + Date(timeIntervalSince1970: ledger.adsUpdated).formatted(date: .abbreviated, time: .shortened) + " · " : "")
+                         + "数据来自 AdsPower「团队管理 → 登录活动」")
+                }
+            }
+            .navigationTitle("登录设备 \(list.isEmpty ? (ledger.adsDeviceCount(account) ?? 0) : list.count) 台")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func icon(_ name: String) -> String {
+        let n = name.lowercased()
+        if n.contains("mac") || n.contains("apple") { return "laptopcomputer" }
+        if n.hasPrefix("desktop") || n.hasPrefix("laptop") || n.hasPrefix("win") { return "pc" }
+        return "desktopcomputer"
     }
 }

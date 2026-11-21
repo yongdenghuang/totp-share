@@ -207,6 +207,14 @@ dialog.dlg::backdrop { background: rgba(10, 12, 24, .45); }
 .acct .cell { flex: 1; }
 .dev-chip { flex: none; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap;
   color: #2563eb; background: color-mix(in srgb, #2563eb 12%, transparent); font-variant-numeric: tabular-nums; }
+.dev-chip { border: 0; cursor: pointer; font-family: inherit; }
+.dev-chip:hover { filter: brightness(0.95); text-decoration: underline; }
+.dev-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; min-width: min(420px, 80vw); }
+.dev-list li { padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, #2563eb 7%, transparent); }
+.dev-top { display: flex; justify-content: space-between; gap: 12px; }
+.dev-time, .dev-sub, .dev-note { font-size: 12px; opacity: .7; font-variant-numeric: tabular-nums; }
+.dev-sub { margin-top: 2px; word-break: break-all; }
+.dev-note { margin: 12px 0 0; }
 .dev-chip.zero { color: var(--muted, #888); background: color-mix(in srgb, currentColor 10%, transparent); }
 .code {
   flex: none; border: 1px solid var(--line2); background: var(--panel); border-radius: 7px; padding: 2px 7px;
