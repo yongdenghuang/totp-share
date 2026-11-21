@@ -175,3 +175,38 @@ def test_sidebar_order_is_saved_and_shared(ctx):
     assert [x["id"] for x in call(c, "get", f"{api}/state").get_json()["state"]["sheets"]] == ["c", "a", "b"]
     s = side("/admin/dashboard")
     assert s.index('data-item="c"') < s.index('data-item="a"') < s.index('data-item="b"')
+
+
+def test_sidebar_cross_section_and_rename(ctx):
+    c = ctx.admin()
+    api = "/admin/hezu/api"
+
+    def side(path):
+        html = call(c, "get", path).get_data(as_text=True)
+        return html.split('class="side"', 1)[1].split("</nav>", 1)[0]
+
+    def sec(html, name):
+        return html.split(f'data-sec="{name}"', 1)[1].split('class="nav-sec"', 1)[0]
+
+    call(c, "put", f"{api}/state", json={"rev": 0, "state": {"sheets": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}], "months": {}, "vps": []}})
+    # 表 b 拖到「验证码」，支付卡拖到「账号」；只传了这两个分类，旧位置自动拿掉
+    r = call(c, "post", f"{api}/nav-order", json={"items": {"totp": ["dashboard", "b", "logs", "settings"], "accounts": ["a", "cards"]}})
+    o = r.get_json()["navOrder"]
+    assert o["items"]["totp"] == ["dashboard", "b", "logs", "settings"]
+    assert o["items"]["accounts"] == ["a", "cards"] and o["items"]["backend"] == ["vps", "gpt"]
+    s = side("/admin/dashboard")
+    assert 'data-item="b"' in sec(s, "totp") and 'data-item="cards"' in sec(s, "accounts")
+    assert 'data-item="cards"' not in sec(s, "backend")
+    # 改名；留空恢复默认；太长截断
+    o = call(c, "post", f"{api}/nav-order", json={"labels": {"backend": "  我的 后台 ", "totp": "x" * 50, "bogus": "y"}}).get_json()["navOrder"]
+    assert o["labels"]["backend"] == "我的 后台" and o["labels"]["totp"] == "x" * 20 and "bogus" not in o["labels"]
+    assert "我的 后台" in side("/admin/vault")
+    assert o["items"]["totp"] == ["dashboard", "b", "logs", "settings"]          # 改名不影响位置
+    o = call(c, "post", f"{api}/nav-order", json={"labels": {"backend": ""}}).get_json()["navOrder"]
+    assert o["labels"]["backend"] == "后台"
+    assert call(c, "get", f"{api}/context").get_json()["navOrder"] == o
+    # 表删掉以后不再出现，新表进「账号」
+    st = call(c, "get", f"{api}/state").get_json()
+    call(c, "put", f"{api}/state", json={"rev": st["rev"], "state": {"sheets": [{"id": "a", "name": "A"}, {"id": "n", "name": "N"}], "months": {}, "vps": []}})
+    o = call(c, "get", f"{api}/context").get_json()["navOrder"]
+    assert o["items"]["totp"] == ["dashboard", "logs", "settings"] and o["items"]["accounts"] == ["a", "cards", "n"]

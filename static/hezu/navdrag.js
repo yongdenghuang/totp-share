@@ -1,33 +1,45 @@
 'use strict';
-// 左侧导航拖动排序：拖分类名调整大分类的顺序，拖某一项调整它在本分类里的位置（不能拖到别的分类）。
+// 左侧导航：拖分类名调整大分类的顺序；拖某一项调整位置，也能拖到别的分类里（放到分类名上或空白处就接在那个分类最后）。
+// 分类名双击或点铅笔可以改名。
 // 用事件委托挂在 document 上：账本页每次重画导航也不用重新绑定。
-// 「账号」分类里是账本的表：账本页自己处理（hz-sheet-order 事件），其他页面直接请求服务器改账本里的顺序。
+// 账本里的表的先后顺序也跟着存（hz-sheet-order 事件由账本页自己处理，其他页面直接请求服务器）。
 (function () {
   const API = '/admin/hezu/api/';
-  let drag = null;   // { el, kind: 'sec' | 'item', sec }
-  const clear = () => document.querySelectorAll('.side .drop-before, .side .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+  let drag = null;   // { el, kind: 'sec' | 'item' }
+  const clear = () => document.querySelectorAll('.side .drop-before, .side .drop-after, .side .drop-into').forEach(x => x.classList.remove('drop-before', 'drop-after', 'drop-into'));
   const horizontal = () => window.innerWidth <= 880;
+  const itemsOf = sec => Array.from(sec.querySelectorAll('.nav[data-item]'));
 
+  // 返回 { el, mode: 'item' | 'sec' }：放到某一项前后，或者接在某个分类的最后
   function target(e) {
-    if (!drag) return null;
+    if (!drag || !e.target.closest) return null;
     if (drag.kind === 'sec') {
-      const sec = e.target.closest && e.target.closest('.side .nav-sec');
-      return sec && sec !== drag.el ? sec : null;
+      const sec = e.target.closest('.side .nav-sec');
+      return sec && sec !== drag.el ? { el: sec, mode: 'sec' } : null;
     }
-    const it = e.target.closest && e.target.closest('.side .nav[data-item]');
-    return it && it !== drag.el && it.closest('.nav-sec') === drag.sec ? it : null;
+    const it = e.target.closest('.side .nav[data-item]');
+    if (it) return it === drag.el ? null : { el: it, mode: 'item' };
+    const sec = e.target.closest('.side .nav-sec');
+    return sec ? { el: sec, mode: 'end' } : null;
   }
   function after(e, el) {
     const r = el.getBoundingClientRect();
     return horizontal() ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
   }
-  function mark(el) { return drag.kind === 'sec' ? el.querySelector('.nav-label') || el : el; }
+  function show(t, e) {
+    if (t.mode === 'sec') return (t.el.querySelector('.nav-label') || t.el).classList.add(after(e, t.el) ? 'drop-after' : 'drop-before');
+    if (t.mode === 'item') return t.el.classList.add(after(e, t.el) ? 'drop-after' : 'drop-before');
+    const its = itemsOf(t.el).filter(x => x !== drag.el);
+    if (its.length) its[its.length - 1].classList.add('drop-after');
+    else (t.el.querySelector('.nav-label') || t.el).classList.add('drop-into');
+  }
 
   document.addEventListener('dragstart', e => {
+    if (document.querySelector('.side .nav-label input')) return e.preventDefault();   // 正在改名
     const label = e.target.closest && e.target.closest('.side .nav-sec > .nav-label');
     const item = !label && e.target.closest && e.target.closest('.side .nav[data-item]');
     if (!label && !item) return;
-    drag = label ? { el: label.parentElement, kind: 'sec' } : { el: item, kind: 'item', sec: item.closest('.nav-sec') };
+    drag = label ? { el: label.parentElement, kind: 'sec' } : { el: item, kind: 'item' };
     (label || item).classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', label ? label.textContent : item.dataset.item);
@@ -40,36 +52,97 @@
     const t = target(e);
     if (!t) return;
     e.preventDefault();
-    clear();
-    mark(t).classList.add(after(e, t) ? 'drop-after' : 'drop-before');
+    clear(); show(t, e);
   });
   document.addEventListener('drop', e => {
     const t = target(e);
     if (!t) return;
     e.preventDefault();
-    const a = after(e, t), d = drag;
+    const d = drag;
     clear();
-    t.parentElement.insertBefore(d.el, a ? t.nextSibling : t);
-    if (d.kind === 'sec') return saveNav();
-    const secId = d.sec.dataset.sec;
-    const ids = Array.from(d.sec.querySelectorAll('.nav[data-item]')).map(x => x.dataset.item);
-    if (secId === 'accounts') {
+    if (t.mode === 'sec') {
+      t.el.parentElement.insertBefore(d.el, after(e, t.el) ? t.el.nextSibling : t.el);
+      return saveNav();
+    }
+    if (t.mode === 'item') t.el.parentElement.insertBefore(d.el, after(e, t.el) ? t.el.nextSibling : t.el);
+    else {
+      const its = itemsOf(t.el).filter(x => x !== d.el);
+      const ref = its.length ? its[its.length - 1].nextSibling : t.el.querySelector('.nav-label').nextSibling;
+      t.el.insertBefore(d.el, ref);
+    }
+    saveNav();
+    if (d.el.dataset.sheet) {   // 账本里表的先后顺序 = 导航上从上到下的顺序
+      const ids = Array.from(document.querySelectorAll('.side .nav[data-sheet]')).map(x => x.dataset.item);
       const ev = new CustomEvent('hz-sheet-order', { detail: ids, cancelable: true });
       if (document.dispatchEvent(ev)) post('sheet-order', { order: ids });   // 没人接手（不在账本页）就自己存
-    } else saveNav();
+    }
   });
 
   function currentOrder() {
     const secs = Array.from(document.querySelectorAll('.side .nav-sec'));
     const items = {};
-    secs.forEach(s => { if (s.dataset.sec !== 'accounts') items[s.dataset.sec] = Array.from(s.querySelectorAll('.nav[data-item]')).map(x => x.dataset.item); });
+    secs.forEach(s => { items[s.dataset.sec] = itemsOf(s).map(x => x.dataset.item); });
     return { sections: secs.map(s => s.dataset.sec), items };
   }
-  function saveNav() {
-    const order = currentOrder();
-    document.dispatchEvent(new CustomEvent('hz-nav-order', { detail: order }));   // 账本页记下来，重画导航时用
-    post('nav-order', order);
+  let navState = null;   // 服务器回来的完整顺序和名字（账本页重画时用）
+  function saveNav(extra) {
+    const order = Object.assign(currentOrder(), extra || {});
+    const local = Object.assign({}, navState || {}, currentOrder());
+    if (extra && extra.labels) local.labels = Object.assign({}, (navState || {}).labels, extra.labels);
+    document.dispatchEvent(new CustomEvent('hz-nav-order', { detail: local }));   // 账本页记下来，重画导航时用
+    navState = local;
+    post('nav-order', order, d => {
+      if (d && d.navOrder) { navState = d.navOrder; document.dispatchEvent(new CustomEvent('hz-nav-order', { detail: d.navOrder })); }
+    });
   }
+
+  // ---- 改名 ----
+  function rename(label) {
+    if (label.querySelector('input')) return;
+    const text = label.querySelector('.nav-label-text'), sec = label.parentElement.dataset.sec;
+    const old = text.textContent;
+    const inp = document.createElement('input');
+    inp.className = 'nav-label-input'; inp.value = old; inp.maxLength = 20; inp.setAttribute('aria-label', '分类名');
+    label.draggable = false; label.classList.add('editing');
+    text.hidden = true; label.insertBefore(inp, text);
+    inp.focus(); inp.select();
+    let done = false;
+    const finish = save => {
+      if (done) return; done = true;
+      const v = inp.value.replace(/\s+/g, ' ').trim();
+      inp.remove(); text.hidden = false; label.draggable = true; label.classList.remove('editing');
+      if (!save || v === old) return;
+      text.textContent = v || old;   // 留空 = 恢复默认名字，服务器回来后会更新
+      const btn = label.querySelector('.nav-rename');
+      if (btn) btn.setAttribute('aria-label', '给「' + text.textContent + '」改名');
+      saveNav({ labels: { [sec]: v } });
+    };
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    inp.addEventListener('blur', () => finish(true));
+    ['click', 'mousedown', 'dblclick'].forEach(t => inp.addEventListener(t, e => e.stopPropagation()));
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('.side .nav-rename');
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    rename(b.closest('.nav-label'));
+  });
+  document.addEventListener('dblclick', e => {
+    const l = e.target.closest && e.target.closest('.side .nav-sec > .nav-label');
+    if (l) { e.preventDefault(); rename(l); }
+  });
+  // 服务器画的页面：改名后把新名字同步到页面上（留空恢复默认时用得上）
+  document.addEventListener('hz-nav-order', e => {
+    const labels = e.detail && e.detail.labels;
+    if (!labels) return;
+    document.querySelectorAll('.side .nav-sec').forEach(s => {
+      const t = s.querySelector('.nav-label-text');
+      if (t && labels[s.dataset.sec] && !s.querySelector('.nav-label input')) t.textContent = labels[s.dataset.sec];
+    });
+  });
 
   function csrf() {
     const el = document.querySelector('[data-csrf]');
@@ -77,8 +150,8 @@
   }
   // 一个接一个发：连着拖两次时，后一次的顺序一定最后到服务器
   let queue = Promise.resolve();
-  function post(path, body) { queue = queue.then(() => send1(path, body)); return queue; }
-  async function send1(path, body) {
+  function post(path, body, then) { queue = queue.then(() => send1(path, body, then)); return queue; }
+  async function send1(path, body, then) {
     const send = token => fetch(API + path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token }, body: JSON.stringify(body) });
     try {
       let r = await send(csrf());
@@ -87,8 +160,9 @@
         if (c.ok) { const d = await c.json(); document.querySelectorAll('[data-csrf]').forEach(x => { x.dataset.csrf = d.csrf; }); r = await send(d.csrf); }
       }
       if (!r.ok) throw new Error(r.status === 401 ? '登录已过期' : '没保存上');
+      if (then) then(await r.json().catch(() => null));
     } catch (err) {
-      alert('导航顺序' + err.message + '，刷新页面后会恢复原来的顺序。');
+      alert('导航' + err.message + '，刷新页面后会恢复原来的样子。');
     }
   }
 })();

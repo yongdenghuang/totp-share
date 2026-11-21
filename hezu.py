@@ -123,10 +123,13 @@ def context():
     return {"groups": groups, "accounts": accounts, "vault": vault.counts(), "navOrder": nav_order()}
 
 
-# 左侧导航：四个大分类，每个分类里的小项都能拖动调整顺序。顺序存在 settings 表（nav_order），
-# 「账号」分类里的表的顺序就是账本里 sheets 的顺序，存在账本里。验证码各页、账本页、密码本页共用。
+# 左侧导航：四个大分类，名字可以改，小项可以拖到任意分类、调整顺序。存在 settings 表（nav_order）：
+# {"sections": [分类], "items": {分类: [小项 id]}, "labels": {分类: 自定义名字}}。
+# 小项有两种：固定的页面（支付卡、VPS…）和账本里的表（id 是表的 id）。没放到任何分类里的，固定页面回到默认分类，
+# 表进「账号」并按账本里 sheets 的顺序。验证码各页、账本页、密码本页共用。
 NAV_SECTIONS = [("accounts", "账号"), ("backend", "后台"), ("backup", "备份"), ("totp", "验证码")]
-NAV_ITEMS = {"backend": ["cards", "vps", "gpt"], "backup": ["vault", "notes"], "totp": ["dashboard", "logs", "settings"]}
+NAV_ITEMS = {"accounts": [], "backend": ["cards", "vps", "gpt"], "backup": ["vault", "notes"], "totp": ["dashboard", "logs", "settings"]}
+NAV_LABEL_MAX = 20
 
 
 def _ordered(saved, known):
@@ -139,28 +142,84 @@ def _ordered(saved, known):
     return out
 
 
-def nav_order():
+def _sheet_ids(state=None):
+    if state is None:
+        try:
+            state = load_state()[1]
+        except Exception:
+            state = default_state()
+    return [str(s["id"]) for s in state.get("sheets", []) if isinstance(s, dict) and s.get("id")]
+
+
+def _resolve(sections, items, sheets):
+    """每个小项只出现在一个分类里：先按保存的位置放，剩下的固定页面回默认分类，剩下的表接在「账号」后面。"""
+    fixed = {i: sec for sec, lst in NAV_ITEMS.items() for i in lst}
+    known = set(fixed) | set(sheets)
+    used, out = set(), {}
+    for sec in sections:
+        lst = []
+        saved = items.get(sec) if isinstance(items.get(sec), list) else []
+        for x in saved:
+            if isinstance(x, str) and x in known and x not in used:
+                used.add(x)
+                lst.append(x)
+        out[sec] = lst
+    for i, sec in fixed.items():
+        if i not in used:
+            out[sec].append(i)
+    out["accounts"] += [x for x in sheets if x not in used]
+    return out
+
+
+def _labels(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    out = {}
+    for k, default in NAV_SECTIONS:
+        v = raw.get(k)
+        v = " ".join(str(v).split())[:NAV_LABEL_MAX] if isinstance(v, str) else ""
+        out[k] = v or default
+    return out
+
+
+def nav_order(sheets=None):
     try:
         raw = json.loads(_core.get_setting("nav_order", "") or "{}")
     except ValueError:
         raw = {}
     if not isinstance(raw, dict):
         raw = {}
+    sections = _ordered(raw.get("sections"), [k for k, _ in NAV_SECTIONS])
     items = raw.get("items") if isinstance(raw.get("items"), dict) else {}
-    return {"sections": _ordered(raw.get("sections"), [k for k, _ in NAV_SECTIONS]),
-            "items": {k: _ordered(items.get(k), v) for k, v in NAV_ITEMS.items()}}
+    sheets = _sheet_ids() if sheets is None else sheets
+    return {"sections": sections, "items": _resolve(sections, items, sheets), "labels": _labels(raw.get("labels"))}
 
 
 def save_nav_order(data):
     if not isinstance(data, dict):
         raise ValueError("参数错误")
-    cur = nav_order()
+    sheets = _sheet_ids()
+    cur = nav_order(sheets)
     if "sections" in data:
         cur["sections"] = _ordered(data["sections"], [k for k, _ in NAV_SECTIONS])
-    for k, v in (data.get("items") or {}).items() if isinstance(data.get("items"), dict) else []:
-        if k in NAV_ITEMS:
-            cur["items"][k] = _ordered(v, NAV_ITEMS[k])
-    _core.set_setting("nav_order", json.dumps(cur, separators=(",", ":")))
+    if isinstance(data.get("items"), dict):
+        merged = dict(cur["items"])
+        moved = set()
+        for k, v in data["items"].items():
+            if k in NAV_ITEMS and isinstance(v, list):
+                merged[k] = [x for x in v if isinstance(x, str)][:500]
+                moved.update(merged[k])
+        for k in NAV_ITEMS:           # 拖到新分类的小项，从没一起传上来的旧分类里拿掉
+            if k not in data["items"]:
+                merged[k] = [x for x in merged[k] if x not in moved]
+        cur["items"] = _resolve(cur["sections"], merged, sheets)
+    if isinstance(data.get("labels"), dict):
+        labels = dict(cur["labels"])
+        labels.update({k: v for k, v in data["labels"].items() if k in NAV_ITEMS and isinstance(v, str)})
+        cur["labels"] = _labels(labels)
+    # 名字和默认一样的就不存，以后默认名改了也跟着变
+    defaults = dict(NAV_SECTIONS)
+    stored = dict(cur, labels={k: v for k, v in cur["labels"].items() if v != defaults[k]})
+    _core.set_setting("nav_order", json.dumps(stored, ensure_ascii=False, separators=(",", ":")))
     return cur
 
 
@@ -191,12 +250,12 @@ def shell_nav():
         "logs": {"text": "访问记录", "href": url_for("access_logs"), "icon": "list", "on": ["access_logs"]},
         "settings": {"text": "设置", "href": url_for("settings"), "icon": "gear", "on": ["settings"]},
     }
-    order = nav_order()
-    labels = dict(NAV_SECTIONS)
+    by_id = {x["id"]: x for x in sheets}
+    order = nav_order(list(by_id))
     sections = []
     for sec in order["sections"]:
-        its = sheets if sec == "accounts" else [dict(items[i], id=i) for i in order["items"][sec]]
-        sections.append({"id": sec, "label": labels[sec], "items": its, "newSheet": sec == "accounts"})
+        its = [by_id[i] if i in by_id else dict(items[i], id=i) for i in order["items"][sec]]
+        sections.append({"id": sec, "label": order["labels"][sec], "items": its, "newSheet": sec == "accounts"})
     return {"sections": sections}
 
 

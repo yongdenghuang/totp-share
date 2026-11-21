@@ -4,6 +4,7 @@
   const SEED_ISSUERS = [['Wise', ''], ['Maya Bank', '菲律宾'], ['PalawanPay', '菲律宾'], ['Revolut', ''], ['PayPal', ''], ['Krak', ''], ['Bybit EU', '欧洲'], ['Moniepoint', '尼日利亚']];
   const COUNTRY_GUESS = { mayabank: '菲律宾', maya: '菲律宾', palawanpay: '菲律宾', moniepoint: '尼日利亚', paga: '尼日利亚', bybiteu: '欧洲' };
   const ICONS = {
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
     play: '<rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="m10 8 5 3-5 3z"/>',
@@ -2117,38 +2118,42 @@
 
   // ---------- 页面 ----------
   // 左侧的表可以拖动调整顺序（顺序存在账本里，验证码页面的导航也跟着变）
-  // 左侧导航的拖动排序在 navdrag.js（各页共用）；这里接住「账号」里表的新顺序，改账本再保存
+  // 左侧导航的拖动排序和分类改名在 navdrag.js（各页共用）；这里接住表的新顺序，改账本再保存
   document.addEventListener('hz-sheet-order', e => {
     e.preventDefault();
     const pos = new Map(e.detail.map((id, i) => [id, i]));
     S.sheets.sort((a, b) => (pos.has(a.id) ? pos.get(a.id) : 1e9) - (pos.has(b.id) ? pos.get(b.id) : 1e9));
     touch(); render();
   });
-  document.addEventListener('hz-nav-order', e => { NAV = e.detail; });
-  // 左侧导航的四个大分类，按 NAV 里存的顺序画；和服务器画的 templates/_shell.html 保持一致
+  document.addEventListener('hz-nav-order', e => { NAV = Object.assign({}, NAV, e.detail, { labels: Object.assign({}, NAV.labels, e.detail.labels) }); });
+  // 左侧导航的四个大分类，按 NAV 里存的顺序和名字画；小项可以在分类之间拖。和服务器画的 templates/_shell.html 保持一致（hezu.py 的 _resolve）
   function navSections(nav, link, M) {
-    const drag = el => { el.draggable = true; el.title = '拖动可以调整顺序'; return el; };
+    const drag = el => { el.draggable = true; el.title = '拖动可以调整顺序，也能拖到别的分类'; return el; };
     const items = {
       cards: () => nav('cards', '支付卡', 'card', S.cards.length), vps: () => nav('vps', 'VPS', 'server', S.vps.length),
       gpt: () => link('/admin/gpt', 'GPT 账号', 'brain'),
       vault: () => link('/admin/vault', '密码本', 'lock', VC.items), notes: () => link('/admin/notes', '备忘录', 'note', VC.notes),
       dashboard: () => link('/admin/dashboard', '验证码账号', 'key', A.length), logs: () => link('/admin/logs', '访问记录', 'list'), settings: () => link('/admin/settings', '设置', 'gear'),
     };
-    const defaults = { backend: ['cards', 'vps', 'gpt'], backup: ['vault', 'notes'], totp: ['dashboard', 'logs', 'settings'] };
+    const defaults = { accounts: [], backend: ['cards', 'vps', 'gpt'], backup: ['vault', 'notes'], totp: ['dashboard', 'logs', 'settings'] };
     const labels = { accounts: '账号', backend: '后台', backup: '备份', totp: '验证码' };
     const secs = (NAV.sections || []).filter(k => labels[k]);
     Object.keys(labels).forEach(k => { if (!secs.includes(k)) secs.push(k); });
+    const sheetById = new Map(S.sheets.map(s => [s.id, s])), used = new Set(), place = {};
+    secs.forEach(k => { place[k] = ((NAV.items || {})[k] || []).filter(x => (items[x] || sheetById.has(x)) && !used.has(x) && used.add(x)); });
+    Object.keys(defaults).forEach(k => defaults[k].forEach(x => { if (!used.has(x)) place[k].push(x); }));
+    S.sheets.forEach(s => { if (!used.has(s.id)) place.accounts.push(s.id); });
     return secs.map(k => {
-      let kids;
-      if (k === 'accounts') {
-        kids = [S.sheets.map(s => { const el = drag(nav(s.id, s.name, s.grouped ? 'users' : s.mode === 'resale' ? 'bolt' : 'play', M.rows[s.id].length)); el.dataset.item = s.id; el.dataset.sheet = '1'; return el; }),
-          h('button', { class: 'nav', type: 'button', title: '新建一张表', onclick: () => sheetForm(null) }, icon('plus'), h('span', { text: '新建表' }))];
-      } else {
-        const order = ((NAV.items || {})[k] || []).filter(x => defaults[k].includes(x));
-        defaults[k].forEach(x => { if (!order.includes(x)) order.push(x); });
-        kids = order.map(id => { const el = drag(items[id]()); el.dataset.item = id; return el; });
-      }
-      return h('div', { class: 'nav-sec', 'data-sec': k }, h('div', { class: 'nav-label', draggable: 'true', title: '拖动可以调整分类顺序', text: labels[k] }), kids);
+      const kids = place[k].map(id => {
+        const s = sheetById.get(id);
+        const el = drag(s ? nav(s.id, s.name, s.grouped ? 'users' : s.mode === 'resale' ? 'bolt' : 'play', M.rows[s.id].length) : items[id]());
+        el.dataset.item = id; if (s) el.dataset.sheet = '1';
+        return el;
+      });
+      if (k === 'accounts') kids.push(h('button', { class: 'nav', type: 'button', title: '新建一张表', onclick: () => sheetForm(null) }, icon('plus'), h('span', { text: '新建表' })));
+      const name = ((NAV.labels || {})[k]) || labels[k];
+      return h('div', { class: 'nav-sec', 'data-sec': k }, h('div', { class: 'nav-label', draggable: 'true', title: '拖动可以调整分类顺序，双击改名' },
+        h('span', { class: 'nav-label-text', text: name }), h('button', { class: 'nav-rename', type: 'button', title: '改名', 'aria-label': '给「' + name + '」改名' }, icon('edit', 13))), kids);
     });
   }
   function render() {
