@@ -205,6 +205,9 @@ dialog.dlg::backdrop { background: rgba(10, 12, 24, .45); }
 .top { padding-left: 22px; padding-right: 22px; }
 .acct { display: flex; align-items: center; gap: 4px; }
 .acct .cell { flex: 1; }
+.dev-chip { flex: none; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+  color: #2563eb; background: color-mix(in srgb, #2563eb 12%, transparent); font-variant-numeric: tabular-nums; }
+.dev-chip.zero { color: var(--muted, #888); background: color-mix(in srgb, currentColor 10%, transparent); }
 .code {
   flex: none; border: 1px solid var(--line2); background: var(--panel); border-radius: 7px; padding: 2px 7px;
   font: 600 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--accent); white-space: nowrap; min-width: 68px;

@@ -972,11 +972,30 @@
     searchRows.push({ tr, row });
     return tr;
   }
+  // AdsPower 成员的登录设备数量（只读；数据由 /api/app/adspower/devices 提供，按账号邮箱对上）
+  let ADS = null, adsLoading = null;
+  function devChip(row) {
+    const el = h('span', { class: 'dev-chip', hidden: true });
+    const paint = () => {
+      const n = ADS && ADS.counts ? ADS.counts[String(row.account || '').trim().toLowerCase()] : undefined;
+      el.hidden = n === undefined;
+      if (n === undefined) return;
+      el.textContent = n + ' 台';
+      el.className = 'dev-chip' + (n === 0 ? ' zero' : '');
+      el.title = 'AdsPower 登录设备 ' + n + ' 台' + (ADS.updated ? ' · 更新于 ' + new Date(ADS.updated * 1000).toLocaleString('zh-CN', { hour12: false }) : '');
+    };
+    if (ADS) paint();
+    else {
+      if (!adsLoading) adsLoading = fetch('/api/app/adspower/devices', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).catch(() => null).then(d => { ADS = d || { counts: {} }; });
+      adsLoading.then(paint);
+    }
+    return el;
+  }
   function accountsRowEl(sheet, rows, row, editable) {
     const acct = copyField(row, 'account', { plain: true, ro: !editable, placeholder: '账号', label: '账号', title: '点一下复制账号',
       onChange: () => { if (row.totpId > 0 && totpById(row.totpId)) pushName(row); else if (linkTotp()) { touch(); render(); } } });
     const tr = h('tr', { class: row.stopped ? 'stopped' : '' },
-      h('td', null, h('div', { class: 'acct' }, acct, totpChip(row))),
+      h('td', null, h('div', { class: 'acct' }, acct, devChip(row), totpChip(row))),
       h('td', null, pwField(row, editable)),
       h('td', null, cell(row, 'note', { ro: !editable, label: '备注', placeholder: '备注' })),
       h('td', null, editable ? h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => rowMenu(e.currentTarget, sheet, rows, row) }, icon('more')) : null));

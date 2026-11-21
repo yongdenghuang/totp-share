@@ -20,6 +20,7 @@ final class LedgerStore: ObservableObject {
     @Published var loaded = false
     @Published var saving = false
     @Published var rates: Double?            // 1 美元 = 多少人民币
+    @Published var adsDevices: [String: Int] = [:]   // AdsPower 成员邮箱（小写）→ 登录设备数量
     private var rev = 0
     private var queue: Task<Void, Never>?
 
@@ -43,6 +44,15 @@ final class LedgerStore: ObservableObject {
         guard rates == nil, let d = try? await api.get("/admin/hezu/api/rates") else { return }
         rates = (d.dict("rates")["CNY"] as? Double) ?? (d.dict("rates")["CNY"] as? NSNumber)?.doubleValue
     }
+
+    /// AdsPower 各成员的登录设备数量（只存账号的表上显示「N 台」）
+    func loadAdsDevices() async {
+        guard let d = try? await api.get("/api/app/adspower/devices") else { return }
+        var m: [String: Int] = [:]
+        for (k, v) in d.dict("counts") { if let n = (v as? Int) ?? (v as? NSNumber)?.intValue { m[k] = n } }
+        adsDevices = m
+    }
+    func adsDeviceCount(_ account: String) -> Int? { adsDevices[account.trimmingCharacters(in: .whitespaces).lowercased()] }
 
     // MARK: 保存
     private var pending: [(inout JSON) -> Void] = []

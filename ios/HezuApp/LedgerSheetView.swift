@@ -128,6 +128,7 @@ struct LedgerSheetView: View {
             ledger.api = api; codes.api = api
             if !ledger.loaded { await ledger.load() }
             if !codes.loaded { await codes.load() }
+            await ledger.loadAdsDevices()
         }
     }
 
@@ -415,6 +416,14 @@ struct LedgerRowView: View {
                 chip("key.fill", "密码") { toast.copy(row.str("password"), "已复制密码") }
             } else if let totp, totp.hasPassword {
                 chip("key.fill", "密码") { Task { do { toast.copy(try await codes.password(totp), "已复制密码") } catch { toast.show(error.localizedDescription) } } }
+            }
+            if let n = ledger.adsDeviceCount(row.str("account")) {
+                Label("\(n) 台", systemImage: "desktopcomputer")
+                    .font(.caption.weight(.semibold)).monospacedDigit()
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background((n == 0 ? Color.gray : Color.blue).opacity(0.12), in: Capsule())
+                    .foregroundStyle(n == 0 ? Color.secondary : Color.blue)
+                    .accessibilityLabel("登录设备 \(n) 台")
             }
         }
     }
