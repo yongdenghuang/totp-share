@@ -1054,7 +1054,7 @@
         h('tbody', null, list.map(r => tinted(rowEl(sheet, rows, r, editable, live), rowTint(sheet, r))))));
     }
     if (sheet.mode === 'accounts') {
-      const ac = [['账号', 0], ['账号密码', 150], ['备注', 260], ['', 42]];
+      const ac = [['账号', 420], ['账号密码', 150], ['备注', 0], ['', 42]];   // 账号定宽，宽屏时多出来的空间给备注
       return h('div', { class: 'scroll' }, h('table', { class: 'grid accounts', style: 'min-width:720px;table-layout:fixed' },
         h('colgroup', null, ac.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
         h('thead', null, h('tr', null, ac.map((c, i) => h('th', null, i === 0 && list.some(r => r.totpId > 0 && totpById(r.totpId)) ? codeTimerHead(c[0]) : c[0])))),
