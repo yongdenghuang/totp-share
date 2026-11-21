@@ -29,20 +29,21 @@ struct WideShell: View {
     @State private var columns = NavigationSplitViewVisibility.all
     private static var launched = false
     @AppStorage("wide_sorting") private var sorting = false   // 「排序」模式：每行右边出现拖动把手
+    @State private var renaming: NavSection?                  // 正在改名的板块
+    @State private var renameText = ""
 
     /// 全部入口（「更多」固定在最下面）
-    private var allIDs: [String] { ["home"] + ledger.moduleIDs.filter { $0.hasPrefix("sheet:") } + ["cards", "vps", "codes", "vault", "notes", "gpt"] }
+    private var allIDs: [String] { ["home"] + ledger.navSections.flatMap(\.items) }
     private var pins: [String] { layout.pins.filter { allIDs.contains($0) } }
-    /// 左栏分组：常用（自己选的快捷入口）/ 合租账本 / 工具；放进常用的就不在下面重复出现
+    /// 左栏分组：常用（自己选的快捷入口，只存在这台设备上）/ 首页 / 网页上的那几个板块（名字、顺序、
+    /// 每个板块里有什么，都和网页左侧导航同步）/ 更多。放进常用的就不在下面重复出现
     private var groups: [(key: String, title: String, ids: [String])] {
-        let rest = { (ids: [String]) in layout.sideOrdered(ids.filter { !pins.contains($0) }) }
-        return [("pins", "常用", pins),
-                ("top", "", rest(["home"])),
-                ("ledger", "合租账本", rest(ledger.moduleIDs.filter { $0.hasPrefix("sheet:") } + ["cards", "vps"])),
-                ("tools", "工具", rest(["codes", "vault", "notes", "gpt"])),
-                ("more", "", ["more"])]
-            .filter { !$0.ids.isEmpty || $0.key == "pins" }
+        [("pins", "常用", pins)]
+        + (pins.contains("home") ? [] : [("top", "", ["home"])])
+        + ledger.navSections.map { ("nav:" + $0.id, $0.label, $0.items.filter { !pins.contains($0) }) }
+        + [("more", "", ["more"])]
     }
+    private func navID(_ key: String) -> String? { key.hasPrefix("nav:") ? String(key.dropFirst(4)) : nil }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
@@ -73,10 +74,22 @@ struct WideShell: View {
                                 }
                                 .buttonStyle(.borderless).textCase(nil)
                             }
+                        } else if let sec = navID(g.key), let n = ledger.navSections.first(where: { $0.id == sec }) {
+                            HStack {
+                                Text(g.title).font(.system(size: 13, weight: .bold)).foregroundStyle(.secondary)
+                                Spacer()
+                                if sorting {
+                                    Button { startRename(n) } label: { Image(systemName: "pencil") }
+                                        .buttonStyle(.borderless).help("给「\(g.title)」改名").accessibilityLabel("给「\(g.title)」改名")
+                                }
+                            }
+                            .textCase(nil)
+                            .contentShape(Rectangle())
+                            .contextMenu { Button { startRename(n) } label: { Label("改名…", systemImage: "pencil") } }
                         } else if !g.title.isEmpty { Text(g.title) }
                     } footer: {
                         if g.key == "pins" && !g.ids.isEmpty {
-                            Text("点「排序」后拖动右边的三条线调整顺序；右键「添加到常用 / 从常用移除」；⌘1…⌘\(g.ids.count) 直接打开").font(.caption2)
+                            Text("点「排序」后拖动右边的三条线调整顺序，板块名旁边的铅笔可以改名；右键任意一项可以「移到」别的板块；⌘1…⌘\(g.ids.count) 直接打开").font(.caption2)
                         }
                     }
                 }
@@ -84,6 +97,14 @@ struct WideShell: View {
             .listStyle(.sidebar)
             .environment(\.editMode, .constant(sorting ? .active : .inactive))
             .navigationTitle("合租管理")
+            .alert("板块改名", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                TextField("板块名字", text: $renameText)
+                Button("取消", role: .cancel) { renaming = nil }
+                Button("保存") {
+                    if let n = renaming { let v = String(renameText.prefix(20)); Task { await ledger.navRename(n.id, v) } }
+                    renaming = nil
+                }
+            } message: { Text("网页和 App 的左栏一起改。留空恢复默认名字。") }
             .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
             .background(shortcuts)
         } detail: {
@@ -108,14 +129,16 @@ struct WideShell: View {
         }
     }
 
-    /// 同一组里拖动排序
+    private func startRename(_ n: NavSection) { renameText = n.label; renaming = n }
+
+    /// 同一组里拖动排序（板块里的顺序存到服务器，网页也跟着变）
     private func move(_ g: (key: String, title: String, ids: [String]), from: IndexSet, to: Int) {
         if g.key == "pins" {
             layout.pins.move(fromOffsets: from, toOffset: to)
-        } else {
+        } else if let sec = navID(g.key) {
             var o = g.ids
             o.move(fromOffsets: from, toOffset: to)
-            layout.sideOrder = layout.sideOrder.filter { !g.ids.contains($0) } + o
+            Task { await ledger.navSetVisibleOrder(sec, visible: o) }
         }
     }
 
@@ -128,8 +151,17 @@ struct WideShell: View {
                 Button { layout.pinShift(id, by: 1) } label: { Label("下移", systemImage: "arrow.down") }.disabled(group.ids.last == id)
             } else {
                 Button { layout.togglePin(id) } label: { Label("添加到常用", systemImage: "star") }.disabled(layout.pins.count >= LayoutPrefs.maxPins)
-                Button { layout.sideShift(id, by: -1, in: group.ids) } label: { Label("上移", systemImage: "arrow.up") }.disabled(group.ids.first == id)
-                Button { layout.sideShift(id, by: 1, in: group.ids) } label: { Label("下移", systemImage: "arrow.down") }.disabled(group.ids.last == id)
+                if let sec = navID(group.key) {
+                    Button { Task { await ledger.navSetVisibleOrder(sec, visible: LayoutPrefs.shifted(group.ids, id, by: -1)) } } label: { Label("上移", systemImage: "arrow.up") }.disabled(group.ids.first == id)
+                    Button { Task { await ledger.navSetVisibleOrder(sec, visible: LayoutPrefs.shifted(group.ids, id, by: 1)) } } label: { Label("下移", systemImage: "arrow.down") }.disabled(group.ids.last == id)
+                }
+            }
+            if id != "home", let cur = ledger.navSection(of: id) {
+                Menu {
+                    ForEach(ledger.navSections.filter { $0.id != cur.id }) { s in
+                        Button(s.label) { Task { await ledger.navMove(id, to: s.id) } }
+                    }
+                } label: { Label("移到", systemImage: "arrow.right.square") }
             }
         }
     }

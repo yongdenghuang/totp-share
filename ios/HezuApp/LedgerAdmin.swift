@@ -132,6 +132,7 @@ struct SheetsManager: View {
                     var ids = ledger.sheetInfo.map(\.id); ids.move(fromOffsets: from, toOffset: to)
                     let order = ids
                     ledger.edit { $0.reorderSheets(order) }
+                    Task { await ledger.navApplySheetOrder(order) }   // 左栏里各板块的表也按这个顺序
                 }
                 Button { creating = true } label: { Label("新建表", systemImage: "plus.circle") }
             } footer: { Text("拖动右边的三条线调整顺序（网页左侧导航也跟着变），点一下改名或换收费方式。") }

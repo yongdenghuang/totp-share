@@ -53,6 +53,12 @@ final class LayoutPrefs: ObservableObject {
         o.swapAt(i, j)
         sideOrder = sideOrder.filter { !ids.contains($0) } + o
     }
+    static func shifted(_ list: [String], _ id: String, by delta: Int) -> [String] {
+        var o = list
+        guard let i = o.firstIndex(of: id) else { return o }
+        let j = max(0, min(o.count - 1, i + delta)); if j != i { o.swapAt(i, j) }
+        return o
+    }
     func pinMove(_ id: String, onto target: String) { pins = Self.moved(pins, id, onto: target) }
     func pinShift(_ id: String, by delta: Int) {
         guard let i = pins.firstIndex(of: id) else { return }
@@ -89,6 +95,8 @@ func moduleInfo(_ id: String, ledger: LedgerStore, codes: CodesStore, vault: Vau
     case "vps": return ModuleInfo(title: "VPS", sub: "\(ledger.vps.count) 台", icon: "server.rack", color: Color(red: 0.15, green: 0.45, blue: 0.85))
     case "cards": return ModuleInfo(title: "支付卡", sub: "\(ledger.cards.count) 张", icon: "creditcard.fill", color: Color(red: 0.4, green: 0.42, blue: 0.47))
     case "gpt": return ModuleInfo(title: "GPT 账号", sub: "\(gpt.accounts.count) 个", icon: "brain.head.profile", color: Color(red: 0.06, green: 0.64, blue: 0.5))
+    case "logs": return ModuleInfo(title: "访问记录", sub: "", icon: "list.bullet.rectangle", color: Color(red: 0.35, green: 0.4, blue: 0.55))
+    case "settings": return ModuleInfo(title: "设置", sub: "", icon: "gearshape.fill", color: Color(red: 0.45, green: 0.47, blue: 0.52))
     default:
         let sid = String(id.dropFirst(6))
         guard let s = ledger.sheetInfo.first(where: { $0.id == sid }) else { return ModuleInfo(title: "已删除的表", sub: "", icon: "questionmark", color: .gray) }
@@ -108,6 +116,8 @@ struct ModuleView: View {
         case "vps": VPSView()
         case "cards": CardsView()
         case "gpt": GPTView()
+        case "logs": LogsView()
+        case "settings": SettingsView()
         default: LedgerSheetView(sheetID: String(id.dropFirst(6)))
         }
     }
@@ -211,6 +221,8 @@ private let fixedTileColors: [String: [Color]] = [
     "vps":   pair("#38bdf8", "#2563eb"),   // 蓝
     "cards": pair("#f472b6", "#db2777"),   // 粉
     "gpt":   pair("#4ade80", "#16a34a"),   // 绿
+    "logs":  pair("#94a3b8", "#475569"),   // 灰蓝
+    "settings": pair("#a1a1aa", "#52525b"), // 灰
 ]
 /// 合租表依次用这些颜色
 private let sheetTileColors: [[Color]] = [

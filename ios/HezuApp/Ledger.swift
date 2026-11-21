@@ -23,6 +23,7 @@ final class LedgerStore: ObservableObject {
     @Published var adsDevices: [String: Int] = [:]   // AdsPower 成员邮箱（小写）→ 登录设备数量
     @Published var adsDetails: [String: [JSON]] = [:] // 邮箱 → 每台设备 {name, ip, region, time}
     @Published var adsUpdated: Double = 0
+    @Published private(set) var nav: JSON = [:]       // 左栏板块的顺序和名字（和网页共用，见 LedgerNav）
     private var rev = 0
     private var queue: Task<Void, Never>?
 
@@ -40,6 +41,7 @@ final class LedgerStore: ObservableObject {
         S = d.dict("state"); rev = d.int("rev")
         groups = d.list("groups").map { LGroup(id: $0.str("id"), name: $0.str("name"), color: $0.str("color")) }
         totp = d.list("accounts").map { LTotp(id: $0.int("id"), name: $0.str("name"), group: $0.str("group"), hasPassword: $0.bool("hasPassword")) }
+        if let n = d["navOrder"] as? JSON { nav = n }
     }
 
     func loadRates() async {
@@ -313,5 +315,99 @@ extension LedgerStore {
             out.append(DueItem(id: v.str("id"), days: d, title: v.str("host").isEmpty ? "未命名 VPS" : v.str("host"), meta: "VPS", route: .vps))
         }
         return out.sorted { $0.days < $1.days }
+    }
+}
+
+// MARK: - 左栏板块（和网页左侧导航是同一份，存在服务器 nav_order 里）
+/// 网页上的小项 id：表的 id、cards、vps、gpt、vault、notes、dashboard、logs、settings。App 里对应的模块 id：
+/// 表是 sheet:<id>，dashboard 是 codes，其余一样。规则和 hezu.py 的 _resolve 一样：
+/// 先按保存的位置放，剩下的固定页面回默认板块，剩下的表接在「账号」后面。
+struct NavSection: Identifiable, Equatable { let id: String; let label: String; let items: [String] }
+
+extension LedgerStore {
+    static let navDefaults: [(id: String, label: String, items: [String])] = [
+        ("accounts", "账号", []), ("backend", "后台", ["cards", "vps", "gpt"]),
+        ("backup", "备份", ["vault", "notes"]), ("totp", "验证码", ["dashboard", "logs", "settings"])]
+    private static let fixedWeb: Set<String> = ["cards", "vps", "gpt", "vault", "notes", "dashboard", "logs", "settings"]
+    static func appID(_ web: String) -> String { web == "dashboard" ? "codes" : fixedWeb.contains(web) ? web : "sheet:" + web }
+    static func webID(_ app: String) -> String { app == "codes" ? "dashboard" : app.hasPrefix("sheet:") ? String(app.dropFirst(6)) : app }
+
+    var navSections: [NavSection] {
+        var secs = ((nav["sections"] as? [String]) ?? []).filter { s in Self.navDefaults.contains { $0.id == s } }
+        for d in Self.navDefaults where !secs.contains(d.id) { secs.append(d.id) }
+        let items = nav.dict("items"), labels = nav.dict("labels")
+        let sheetIDs = sheetInfo.map(\.id), sheetSet = Set(sheetIDs)
+        var used = Set<String>(), place: [String: [String]] = [:]
+        for s in secs {
+            var lst: [String] = []
+            for x in (items[s] as? [String]) ?? [] where (Self.fixedWeb.contains(x) || sheetSet.contains(x)) && !used.contains(x) { used.insert(x); lst.append(x) }
+            place[s] = lst
+        }
+        for d in Self.navDefaults { for x in d.items where !used.contains(x) { used.insert(x); place[d.id, default: []].append(x) } }
+        for x in sheetIDs where !used.contains(x) { place["accounts", default: []].append(x) }
+        return secs.map { s in
+            let custom = (labels[s] as? String) ?? ""
+            return NavSection(id: s, label: custom.isEmpty ? Self.navDefaults.first { $0.id == s }!.label : custom,
+                              items: (place[s] ?? []).map(Self.appID))
+        }
+    }
+    func navSection(of appID: String) -> NavSection? { navSections.first { $0.items.contains(appID) } }
+
+    /// 先在本地改（界面立刻变），再存到服务器；服务器回来的为准
+    private func saveNav(_ body: JSON) async {
+        var n = nav
+        if let it = body["items"] as? [String: [String]] {
+            var cur = n.dict("items")
+            let moved = Set(it.values.flatMap { $0 })
+            for (k, v) in cur where it[k] == nil { cur[k] = ((v as? [String]) ?? []).filter { !moved.contains($0) } }
+            for (k, v) in it { cur[k] = v }
+            n["items"] = cur
+        }
+        if let lb = body["labels"] as? [String: String] {
+            var cur = n.dict("labels"); for (k, v) in lb { cur[k] = v }; n["labels"] = cur
+        }
+        nav = n
+        do {
+            let d = try await api.post("/admin/hezu/api/nav-order", body)
+            if let o = d["navOrder"] as? JSON { nav = o }
+        } catch {
+            self.error = "左栏没保存上：" + error.localizedDescription
+            await load()
+        }
+    }
+    /// 某个板块里的新顺序（App 模块 id）
+    func navSetOrder(_ sec: String, _ appIDs: [String]) async { await saveNav(["items": [sec: appIDs.map(Self.webID)]]) }
+    /// 只动了能看见的那几项（放进「常用」的不在下面显示）：其余的留在原来的位置
+    func navSetVisibleOrder(_ sec: String, visible: [String]) async {
+        guard let full = navSections.first(where: { $0.id == sec })?.items else { return }
+        var it = visible.makeIterator()
+        let set = Set(visible)
+        await navSetOrder(sec, full.map { set.contains($0) ? (it.next() ?? $0) : $0 })
+    }
+    /// 移到另一个板块的最后
+    func navMove(_ appID: String, to sec: String) async {
+        guard let t = navSections.first(where: { $0.id == sec }), !t.items.contains(appID) else { return }
+        await navSetOrder(sec, t.items + [appID])
+    }
+    func navShift(_ appID: String, by delta: Int) async {
+        guard let s = navSection(of: appID), let i = s.items.firstIndex(of: appID) else { return }
+        let j = max(0, min(s.items.count - 1, i + delta)); guard j != i else { return }
+        var o = s.items; o.swapAt(i, j)
+        await navSetOrder(s.id, o)
+    }
+    /// 改名；留空恢复默认名字
+    func navRename(_ sec: String, _ name: String) async {
+        await saveNav(["labels": [sec: name.split(whereSeparator: \.isWhitespace).joined(separator: " ")]])
+    }
+    /// 「表设置」里调整了表的顺序：每个板块里的表按新顺序排，别的小项不动
+    func navApplySheetOrder(_ order: [String]) async {
+        var items: [String: [String]] = [:]
+        for s in navSections {
+            let mine = order.map { "sheet:" + $0 }.filter { s.items.contains($0) }
+            var it = mine.makeIterator()
+            let o = s.items.map { $0.hasPrefix("sheet:") ? (it.next() ?? $0) : $0 }
+            if o != s.items { items[s.id] = o.map(Self.webID) }
+        }
+        if !items.isEmpty { await saveNav(["items": items]) }
     }
 }

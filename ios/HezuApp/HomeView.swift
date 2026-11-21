@@ -248,23 +248,43 @@ struct WebPage: Identifiable, Hashable {
 struct MoreView: View {
     @EnvironmentObject var api: API
     @EnvironmentObject var ledger: LedgerStore
+    @EnvironmentObject var codes: CodesStore
+    @EnvironmentObject var vault: VaultStore
+    @EnvironmentObject var notes: NotesStore
+    @EnvironmentObject var gpt: GPTStore
     @State private var confirmLogout = false
+    @State private var renaming: NavSection?
+    @State private var renameText = ""
 
     var body: some View {
         List {
-            Section("合租账本") {
-                ForEach(ledger.sheetInfo) { s in
-                    NavigationLink { LedgerDestination(route: .sheet(s.id)) } label: { Label(s.name, systemImage: s.grouped ? "person.2" : s.mode == "resale" ? "bolt" : "play.rectangle") }
+            // 和网页左侧导航一样的几个板块：名字、顺序、每个板块里有什么都同步。
+            // 点板块名旁边的铅笔改名；长按某一项可以上移、下移、移到别的板块
+            ForEach(ledger.navSections) { sec in
+                Section {
+                    ForEach(sec.items, id: \.self) { id in
+                        let m = moduleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt)
+                        NavigationLink { ModuleView(id: id) } label: { Label(m.title, systemImage: m.icon) }
+                            .contextMenu { itemMenu(id, sec) }
+                    }
+                    .onMove { from, to in
+                        var o = sec.items; o.move(fromOffsets: from, toOffset: to)
+                        Task { await ledger.navSetOrder(sec.id, o) }
+                    }
+                } header: {
+                    HStack {
+                        Text(sec.label).font(.subheadline.weight(.bold)).foregroundStyle(.primary)
+                        Spacer()
+                        Button { renameText = sec.label; renaming = sec } label: { Image(systemName: "pencil").font(.subheadline) }
+                            .buttonStyle(.borderless).accessibilityLabel("给「\(sec.label)」改名")
+                    }
+                    .textCase(nil)
                 }
-                NavigationLink { LedgerDestination(route: .cards) } label: { Label("支付卡", systemImage: "creditcard") }
-                NavigationLink { LedgerDestination(route: .vps) } label: { Label("VPS", systemImage: "server.rack") }
+            }
+            Section("管理") {
                 NavigationLink { SheetsManager() } label: { Label("表设置（新建、改名、排序）", systemImage: "tablecells") }
                 NavigationLink { LedgerDataView() } label: { Label("导入导出、备份、历史版本", systemImage: "arrow.up.arrow.down.square") }
-            }
-            Section("后台") {
-                NavigationLink { LogsView() } label: { Label("访问记录", systemImage: "list.bullet.rectangle") }
                 NavigationLink { GroupsManager() } label: { Label("分组管理", systemImage: "folder") }
-                NavigationLink { SettingsView() } label: { Label("设置", systemImage: "gearshape") }
             }
             Section {
                 NavigationLink { LayoutSettingsView() } label: { Label("自定义首页和底部标签", systemImage: "square.grid.3x3.square") }
@@ -282,9 +302,28 @@ struct MoreView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("更多")
+        .alert("板块改名", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("板块名字", text: $renameText)
+            Button("取消", role: .cancel) { renaming = nil }
+            Button("保存") {
+                if let n = renaming { let v = String(renameText.prefix(20)); Task { await ledger.navRename(n.id, v) } }
+                renaming = nil
+            }
+        } message: { Text("网页和 App 的左栏一起改。留空恢复默认名字。") }
         .confirmationDialog("退出登录？", isPresented: $confirmLogout, titleVisibility: .visible) {
             Button("退出登录", role: .destructive) { Task { await api.logout() } }
         } message: { Text("下次打开 App 要重新输入用户名和密码。") }
+    }
+
+    @ViewBuilder
+    private func itemMenu(_ id: String, _ sec: NavSection) -> some View {
+        Button { Task { await ledger.navShift(id, by: -1) } } label: { Label("上移", systemImage: "arrow.up") }.disabled(sec.items.first == id)
+        Button { Task { await ledger.navShift(id, by: 1) } } label: { Label("下移", systemImage: "arrow.down") }.disabled(sec.items.last == id)
+        Menu {
+            ForEach(ledger.navSections.filter { $0.id != sec.id }) { s in
+                Button(s.label) { Task { await ledger.navMove(id, to: s.id) } }
+            }
+        } label: { Label("移到", systemImage: "arrow.right.square") }
     }
 
     private func webLink(_ title: String, _ icon: String, _ path: String) -> some View {
