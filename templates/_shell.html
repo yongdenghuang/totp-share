@@ -37,6 +37,10 @@
    {% if sec.newSheet %}<a class="nav" href="{{ url_for('hezu_page') }}#new-sheet" title="新建一张表">{{ icon('plus') }}<span>新建表</span></a>{% endif %}
   </div>
   {% endfor %}
+  {# Chrome：鼠标在左侧导航的链接上停一下，就在后台先把那一页加载好，点下去几乎马上打开（不支持的浏览器忽略这段） #}
+  <script type="speculationrules">
+  {"prerender": [{"where": {"and": [{"selector_matches": ".side a.nav[href]"}, {"not": {"href_matches": "/t/*"}}]}, "eagerness": "moderate"}]}
+  </script>
   <div class="side-foot">
    <button class="nav" type="button" data-fx-toggle title="汇率计算器">{{ icon('fx') }}<span>汇率计算器</span></button>
    <form method="post" action="{{ url_for('logout') }}">

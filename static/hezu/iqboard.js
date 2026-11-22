@@ -79,12 +79,17 @@
   // ---------- 状态 ----------
   let S = { configured: null, url: '', accounts: [], plan: {}, filter: '', runId: null, run: {}, error: '' };
 
+  // 第一次打开页面：连接设置已经写在页面里，账号列表可以用服务器 15 秒内的缓存；之后（改了东西、测试完）都拿最新的
+  let first = true;
   async function load() {
     try {
-      const c = await api('GET', 'config');
+      const root = document.getElementById('gpt');
+      const c = first && root && 'url' in root.dataset ? { url: root.dataset.url, hasKey: !!root.dataset.hasKey } : await api('GET', 'config');
+      const q = first ? '' : '?fresh=1';
+      first = false;
       S.url = c.url; S.configured = !!(c.url && c.hasKey);
       if (S.configured) {
-        const [a, p] = await Promise.all([api('GET', 'accounts'), api('GET', 'plan').catch(() => ({ plan: {} }))]);
+        const [a, p] = await Promise.all([api('GET', 'accounts' + q), api('GET', 'plan' + q).catch(() => ({ plan: {} }))]);
         S.accounts = a.accounts; S.plan = p.plan || {};
       }
       S.error = '';

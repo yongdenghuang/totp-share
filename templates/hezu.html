@@ -16,6 +16,10 @@
 <div id="app" data-csrf="{{ csrf_token() }}" data-user="{{ session.admin_user }}"></div>
 <script src="{{ hz_static('hezu/fx.js') }}"></script>
 <script src="{{ hz_static('hezu/navdrag.js') }}"></script>
+{# Chrome：鼠标在左侧导航的链接上停一下，就在后台先把那一页加载好（导航由 app.js 画，规则对后来加的链接也有效） #}
+<script type="speculationrules">
+{"prerender": [{"where": {"and": [{"selector_matches": ".side a.nav[href]"}, {"not": {"href_matches": "/t/*"}}]}, "eagerness": "moderate"}]}
+</script>
 {% include "_pwgen.html" %}
 <script src="{{ hz_static('hezu/app.js') }}"></script>
 </body>

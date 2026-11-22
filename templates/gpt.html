@@ -16,7 +16,7 @@
 <body class="hz vault-body">
 {% from '_shell.html' import sidebar with context %}
 {{ sidebar() }}
- <main class="main"><div id="gpt" data-csrf="{{ csrf_token() }}"></div></main>
+ <main class="main"><div id="gpt" data-csrf="{{ csrf_token() }}" data-url="{{ sub2api_url }}" data-has-key="{{ '1' if sub2api_has_key else '' }}"></div></main>
 </div>
 <script src="{{ hz_static('hezu/fx.js') }}"></script>
 <script src="{{ hz_static('hezu/navdrag.js') }}"></script>

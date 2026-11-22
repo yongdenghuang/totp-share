@@ -134,7 +134,7 @@ struct GlobalSearchResults: View {
         .tint(.primary)
         .task {
             if Date() >= codes.expiresAt { await codes.refreshCodes() }
-            if !gpt.loaded { await gpt.load() }
+            if !gpt.loaded { await gpt.load(fresh: false) }
         }
         .task(id: codes.expiresAt) {
             // 验证码到期就换新的

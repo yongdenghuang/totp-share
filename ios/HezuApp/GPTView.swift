@@ -14,14 +14,16 @@ final class GPTStore: ObservableObject {
     @Published var runID: Int?
     @Published var run: JSON = [:]
 
-    func load() async {
+    /// fresh=false：用服务器 15 秒内的缓存（刚打开页面时），其余时候都拿最新的
+    func load(fresh: Bool = true) async {
+        let q = fresh ? "?fresh=1" : ""
         do {
             let c = try await api.get("/api/app/gpt/config")
             url = c.str("url")
             configured = !url.isEmpty && c.bool("hasKey")
             guard configured == true else { loaded = true; return }
-            async let a = api.get("/api/app/gpt/accounts")
-            async let p = api.get("/api/app/gpt/plan")
+            async let a = api.get("/api/app/gpt/accounts" + q)
+            async let p = api.get("/api/app/gpt/plan" + q)
             accounts = try await a.list("accounts")
             plan = (try? await p.dict("plan")) ?? [:]
             error = nil
@@ -87,7 +89,7 @@ struct GPTView: View {
             else { list }
         }
         .navigationTitle("GPT 账号")
-        .task { store.api = api; if !store.loaded { await store.load() } }
+        .task { store.api = api; if !store.loaded { await store.load(fresh: false) } }
         .sheet(isPresented: $adding, onDismiss: { Task { await store.load() } }) { GPTAuthSheet() }
         .sheet(isPresented: $showConfig, onDismiss: { Task { await store.load() } }) { NavigationStack { GPTSetupView(done: { showConfig = false }) } }
     }

@@ -52,6 +52,7 @@ class FakeSub2api:
 def setup(ctx, monkeypatch):
     fake = FakeSub2api()
     monkeypatch.setattr(gptlink, "call", fake)
+    gptlink.clear_cache()
     return fake
 
 
@@ -104,3 +105,47 @@ def test_plan_test_and_oauth(ctx, monkeypatch):
     assert ok["account"]["email"] == "n@example.com"
     create = next(x for x in fake.calls if x[1].endswith("/create-from-oauth"))
     assert create[2] == {"session_id": "s1", "code": "c123", "state": "abc", "concurrency": 10, "priority": 1}
+
+
+def test_connection_is_reused_and_recovers():
+    """和 sub2api 的连接反复用；对方把闲置连接关掉以后，自动重连。"""
+    import http.server
+    import threading
+    conns, drop = [], []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def setup(self):
+            super().setup()
+            conns.append(1)
+
+        def do_GET(self):
+            body = b'{"code":0,"data":{"ok":1}}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            if drop:                  # 像服务器闲置超时那样，悄悄把连接关掉
+                self.close_connection = True
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        for _ in range(3):
+            assert gptlink.call("GET", "/x", url=url, key="k") == {"ok": 1}
+        assert len(conns) == 1                       # 三次请求只连了一次
+        drop.append(1)
+        assert gptlink.call("GET", "/x", url=url, key="k") == {"ok": 1}   # 这次回完以后服务器关掉了连接
+        drop.clear()
+        import time as _t
+        _t.sleep(0.05)
+        assert gptlink.call("GET", "/x", url=url, key="k") == {"ok": 1}   # 发现连接断了，自动重连
+        assert len(conns) == 2
+    finally:
+        srv.shutdown()
