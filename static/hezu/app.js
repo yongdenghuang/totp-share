@@ -607,12 +607,105 @@
       h('button', { class: 'item', type: 'button', text: '＋ 新建验证码账号…', onclick: () => { closePop(); leave('/admin/accounts/new?name=' + encodeURIComponent(row.account || '')); } })]);
     q.focus();
   }
-  async function copyShareInfo(row) {
-    const r = await api('POST', '/admin/accounts/' + row.totpId + '/share-text', {});
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok || !d.ok) return alertBox(d.error || '取不到分享信息，请刷新页面后再试。');
-    await copyText(d.text);
-    setStatus(d.has_password ? '已复制分享信息' : '已复制分享信息（这个账号没存密码）');
+  async function copyShareInfo(row, el) {
+    let has = true;
+    const text = api('POST', '/admin/accounts/' + row.totpId + '/share-text', {}).then(r => r.json().catch(() => ({}))).then(d => {
+      if (!d.ok) throw new Error(d.error || '取不到分享信息，请刷新页面后再试。');
+      has = d.has_password; return d.text;
+    });
+    try { await copyLater(text, el); } catch (e) { return alertBox(e.message || '复制失败'); }
+    setStatus(has ? '已复制分享信息' : '已复制分享信息（这个账号还没存密码，点「改密码」设置）', !has);
+  }
+  const shareUrl = a => location.origin + '/t/' + a.token;
+  // 分享链接不在账本数据里：打开「只存账号」表时按需取一次
+  const shareTok = {}, sharePending = new Set(); let shareTimer = null;
+  function loadShareLinks(ids) {
+    ids.forEach(id => { if (!(id in shareTok)) sharePending.add(id); });
+    if (!sharePending.size || shareTimer) return;
+    shareTimer = setTimeout(() => {        // 同一次画表里的所有行，一起取
+      const need = Array.from(sharePending); sharePending.clear();
+      api('POST', '/share-links', { ids: need }).then(r => r.json()).then(d => {
+        need.forEach(id => { shareTok[id] = d.ok ? (d.links || {})[id] || '' : ''; });
+        render();
+      }).catch(() => { need.forEach(id => { shareTok[id] = ''; }); render(); }).finally(() => { shareTimer = null; });
+    }, 0);
+  }
+
+  // 「只存账号」表：和验证码账号页一样的分享链接（复制 / 换链接）和操作按钮（复制信息、改密码、预览、记录、编辑）
+  function shareCell(row) {
+    const a0 = row.totpId > 0 ? totpById(row.totpId) : null;
+    if (!a0) return h('span', { class: 'faint small', text: '—' });
+    const a = Object.assign({}, a0, { token: shareTok[a0.id] });
+    if (!a.token) { loadShareLinks([a0.id]); return h('span', { class: 'faint small', text: a.id in shareTok ? '取不到链接' : '…' }); }
+    const link = h('span', { class: 'share-link mono', title: shareUrl(a), text: '/t/' + a.token });
+    const copy = h('button', { class: 'btn xs', type: 'button', text: '复制', title: '复制验证码分享链接', onclick: () => copyLater(Promise.resolve(shareUrl(a)), copy) });
+    const regen = h('button', { class: 'btn xs warn', type: 'button', text: '换链接', title: '生成新链接，旧链接立即失效', onclick: async () => {
+      if (!await confirmBox('换链接', '给「' + a.name + '」换一条新的分享链接？\n\n旧链接会立即失效，正在使用的人需要拿到新链接才能继续看验证码。', '换链接', true)) return;
+      const r = await api('POST', '/admin/accounts/' + a.id + '/regen', {}), d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) return alertBox(d.error || '换链接失败');
+      shareTok[a.id] = d.url_token; render();
+      try { await navigator.clipboard.writeText(d.url); setStatus('已换新链接并复制到剪贴板'); } catch (e) { setStatus('已换新链接（自动复制失败，请点「复制」）'); }
+    } });
+    return h('div', { class: 'share-cell' }, link, copy, regen);
+  }
+  function acctActions(row) {
+    const a = row.totpId > 0 ? totpById(row.totpId) : null;
+    if (!a) return h('button', { class: 'btn xs', type: 'button', text: '关联验证码账号…', onclick: e => linkTotpMenu(e.currentTarget, row) });
+    const tok = shareTok[a.id];
+    const info = h('button', { class: 'btn xs primary', type: 'button', text: '复制信息', title: '复制分组、账号、密码和验证码链接' + (a.hasPassword ? '' : '（这个账号还没保存密码）'), onclick: () => copyShareInfo(row, info) });
+    return h('div', { class: 'acct-actions' }, info,
+      h('button', { class: 'btn xs ok', type: 'button', text: '改密码', title: '生成新密码、查看当前密码', onclick: () => pwDialog(row, a) }),
+      h('a', { class: 'btn xs', href: tok ? '/t/' + tok : '#', target: '_blank', rel: 'noopener', text: '预览', onclick: e => { if (!tok) e.preventDefault(); } }),
+      h('a', { class: 'btn xs', href: '/admin/logs?account=' + a.id, text: '记录', onclick: e => { e.preventDefault(); leave('/admin/logs?account=' + a.id); } }),
+      h('a', { class: 'btn xs', href: '/admin/accounts/' + a.id + '/edit', text: '编辑', onclick: e => { e.preventDefault(); leave('/admin/accounts/' + a.id + '/edit'); } }));
+  }
+  // 改密码：和验证码账号页的弹窗一样——看当前 / 上一个密码，生成新密码，保存并复制，再复制信息发给对方
+  function pwDialog(row, a) {
+    const G2 = window.PwGen;
+    const field = (label, inp, ...btns) => h('label', { class: 'field' }, label, h('div', { class: 'pw-line' }, inp, btns));
+    const ro = () => h('input', { type: 'text', readOnly: true, class: 'mono', spellcheck: false });
+    const cur = ro(), prev = ro(), neu = h('input', { type: 'text', class: 'mono', spellcheck: false, autocomplete: 'off' });
+    const copyBtn = inp => { const b = h('button', { class: 'btn small', type: 'button', text: '复制', onclick: () => { if (inp.value) copyLater(Promise.resolve(inp.value), b); } }); return b; };
+    const p = G2 ? G2.loadPrefs() : { length: 20, digits: true, symbols: true };
+    const len = h('input', { type: 'range', min: G2 ? G2.MIN_LENGTH : 8, max: 40, value: Math.min(p.length, 40) }), lenV = h('b', { text: String(len.value) });
+    const dg = h('input', { type: 'checkbox', checked: p.digits }), sy = h('input', { type: 'checkbox', checked: p.symbols });
+    const opts = () => ({ length: len.value, digits: dg.checked, symbols: sy.checked });
+    let saved = '';
+    const note = h('div', { class: 'muted small' }), prevWrap = field('上一个密码', prev, copyBtn(prev)); prevWrap.hidden = true;
+    const saveBtn = h('button', { class: 'btn small primary', type: 'button', text: '保存并复制新密码' });
+    const infoBtn = h('button', { class: 'btn small', type: 'button', text: '复制信息', hidden: true, onclick: () => copyShareInfo(row, infoBtn) });
+    const refresh = () => { const dirtyPw = neu.value.trim() && neu.value.trim() !== saved; saveBtn.disabled = !dirtyPw; saveBtn.textContent = dirtyPw || !saved ? '保存并复制新密码' : '已保存 ✓'; };
+    const gen = () => { lenV.textContent = len.value; if (G2) { neu.value = G2.generate(opts()); G2.savePrefs(opts()); } refresh(); };
+    len.addEventListener('input', gen); dg.addEventListener('change', gen); sy.addEventListener('change', gen); neu.addEventListener('input', refresh);
+    saveBtn.addEventListener('click', () => {
+      const v = neu.value.trim(); if (!v) return;
+      saveBtn.disabled = true;
+      const done = api('POST', '/admin/accounts/' + a.id + '/password', { password: v }).then(r => r.json().catch(() => ({}))).then(d => {
+        if (!d.ok) throw new Error(d.error || '保存失败');
+        if (saved) { prev.value = saved; prevWrap.hidden = false; }
+        saved = v; cur.value = v; a.hasPassword = true; infoBtn.hidden = false; refresh();
+        return v;
+      });
+      copyLater(done, null);   // 存好的同时放进剪贴板（复制不了会弹提示）
+      done.then(() => { note.textContent = '✓ 已保存，新密码已复制。去官网改好后，回来点「复制信息」发给对方'; },
+        e => { note.textContent = '✗ ' + (e.message || '保存失败'); refresh(); });
+    });
+    gen();
+    note.textContent = '正在读取当前密码…';
+    api('POST', '/admin/accounts/' + a.id + '/password/reveal', {}).then(r => r.json().catch(() => ({}))).then(d => {
+      if (!d.ok) throw new Error(d.error || '读取失败');
+      cur.value = saved = d.password || ''; prev.value = d.previous || ''; prevWrap.hidden = !d.previous;
+      note.textContent = ''; refresh();
+    }).catch(e => { note.textContent = '读取当前密码失败：' + e.message; });
+    dialog('改密码 · ' + a.name, [
+      field('当前保存的密码', cur, copyBtn(cur)), prevWrap,
+      field('新密码', neu, h('button', { class: 'btn small', type: 'button', text: '重新生成', onclick: gen }), copyBtn(neu)),
+      h('div', { class: 'pw-opts' }, h('label', null, '长度 ', len, ' ', lenV), h('label', null, dg, ' 数字'), h('label', null, sy, ' 符号')),
+      h('div', { class: 'rowbtns' }, saveBtn, infoBtn), note,
+      h('div', { class: 'muted small', text: '① 点「保存并复制新密码」→ ② 去官网把密码改成它（已在剪贴板里）→ ③ 回来点「复制信息」发给对方。' })],
+      [{ text: '关闭', cls: 'primary', run: () => {
+        if (neu.value.trim() && neu.value.trim() !== saved && cur.value !== neu.value.trim()) return confirm('新密码还没有保存，确定关闭？') ? undefined : false;
+      } }]).then(() => render());
   }
 
   // ---------- 弹层 ----------
@@ -1007,7 +1100,9 @@
     const tr = h('tr', { class: row.stopped ? 'stopped' : '' },
       h('td', null, h('div', { class: 'acct' }, acct, devChip(row), totpChip(row))),
       h('td', null, pwField(row, editable)),
+      h('td', null, shareCell(row)),
       h('td', null, cell(row, 'note', { ro: !editable, label: '备注', placeholder: '备注' })),
+      h('td', null, acctActions(row)),
       h('td', null, editable ? h('button', { class: 'btn ghost icon', type: 'button', 'aria-label': '更多操作', onclick: e => rowMenu(e.currentTarget, sheet, rows, row) }, icon('more')) : null));
     tr.dataset.row = row.id;
     searchRows.push({ tr, row });
@@ -1054,8 +1149,9 @@
         h('tbody', null, list.map(r => tinted(rowEl(sheet, rows, r, editable, live), rowTint(sheet, r))))));
     }
     if (sheet.mode === 'accounts') {
-      const ac = [['账号', 420], ['账号密码', 150], ['备注', 0], ['', 42]];   // 账号定宽，宽屏时多出来的空间给备注
-      return h('div', { class: 'scroll' }, h('table', { class: 'grid accounts', style: 'min-width:720px;table-layout:fixed' },
+      // 和验证码账号页一样：账号、密码、分享链接、操作按钮；宽屏时多出来的空间给备注
+      const ac = [['账号', 390], ['账号密码', 140], ['分享链接', 230], ['备注', 0], ['操作', 330], ['', 42]];
+      return h('div', { class: 'scroll' }, h('table', { class: 'grid accounts', style: 'min-width:1280px;table-layout:fixed' },
         h('colgroup', null, ac.map(c => h('col', { style: c[1] ? 'width:' + c[1] + 'px' : '' }))),
         h('thead', null, h('tr', null, ac.map((c, i) => h('th', null, i === 0 && list.some(r => r.totpId > 0 && totpById(r.totpId)) ? codeTimerHead(c[0]) : c[0])))),
         h('tbody', null, list.map(r => tinted(rowEl(sheet, rows, r, editable, live), rowTint(sheet, r))))));

@@ -457,3 +457,11 @@ def test_rename_totp_account_from_ledger(ctx):
     assert "mati@example.com" in names and "plus-01" not in names
     assert call(c, "post", f"/admin/accounts/{aid}/field", json={"field": "name", "value": "  "}).status_code == 400
     assert call(c, "post", f"/admin/accounts/{aid}/field", json={"field": "secret_encrypted", "value": "x"}).status_code == 400
+
+
+def test_share_links_on_demand(ctx):
+    c = ctx.admin()
+    ids = [r["id"] for r in ctx.sql("SELECT id FROM accounts")]
+    d = call(c, "post", "/admin/hezu/api/share-links", json={"ids": ids}).get_json()
+    assert d["ok"] and set(d["links"]) == {str(i) for i in ids} and all(d["links"].values())
+    assert call(c, "post", "/admin/hezu/api/share-links", json={"ids": ["x"]}).status_code == 400

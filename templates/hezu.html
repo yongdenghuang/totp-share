@@ -16,6 +16,7 @@
 <div id="app" data-csrf="{{ csrf_token() }}" data-user="{{ session.admin_user }}"></div>
 <script src="{{ hz_static('hezu/fx.js') }}"></script>
 <script src="{{ hz_static('hezu/navdrag.js') }}"></script>
+{% include "_pwgen.html" %}
 <script src="{{ hz_static('hezu/app.js') }}"></script>
 </body>
 </html>

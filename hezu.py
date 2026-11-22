@@ -479,6 +479,19 @@ def install(core):
                 return jsonify(ok=True, name=name)
         return jsonify(ok=False, error="账本正忙，请稍后再试"), 409
 
+    @app.route(API_PREFIX + "share-links", methods=["POST"])
+    @api_limit
+    @login_required
+    def hezu_share_links():
+        """「只存账号」表要显示验证码分享链接（和验证码账号页一样）。链接不放进账本数据里，打开这张表时单独取。"""
+        ids = (read_json() or {}).get("ids")
+        if not isinstance(ids, list) or len(ids) > 500 or not all(isinstance(x, int) for x in ids):
+            return jsonify(ok=False, error="参数错误"), 400
+        if not ids:
+            return jsonify(ok=True, links={})
+        rows = _core.query_all(f"SELECT id, url_token FROM accounts WHERE id IN ({','.join('?' * len(ids))})", ids)
+        return jsonify(ok=True, links={str(r["id"]): r["url_token"] for r in rows})
+
     @app.route(API_PREFIX + "groups", methods=["POST"])
     @api_limit
     @login_required
