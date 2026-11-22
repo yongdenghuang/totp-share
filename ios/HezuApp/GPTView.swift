@@ -78,6 +78,8 @@ struct GPTView: View {
     @State private var adding = false
     @State private var showConfig = false
     @State private var filter = ""
+    @State private var minutesText = ""
+    @FocusState private var minutesFocused: Bool
 
     var body: some View {
         Group {
@@ -150,9 +152,22 @@ struct GPTView: View {
                 }
             }
             if store.plan.bool("enabled") {
-                Picker("间隔", selection: Binding(get: { store.plan.int("intervalMinutes") == 0 ? 360 : store.plan.int("intervalMinutes") }, set: { savePlan(true, $0) })) {
-                    ForEach([60, 180, 360, 720, 1440], id: \.self) { m in Text(m < 1440 ? "每 \(m / 60) 小时" : "每天").tag(m) }
+                // 间隔自己填多少分钟，填完点键盘上的完成或「保存」
+                HStack {
+                    Text("每")
+                    TextField("分钟", text: $minutesText)
+                        .keyboardType(.numberPad).multilineTextAlignment(.trailing).monospacedDigit()
+                        .frame(maxWidth: 90).textFieldStyle(.roundedBorder)
+                        .focused($minutesFocused)
+                        .onSubmit(saveMinutes)
+                    Text("分钟")
+                    Spacer()
+                    if minutesText != String(currentMinutes) {
+                        Button("保存", action: saveMinutes).buttonStyle(.borderless)
+                    }
                 }
+                .onAppear { minutesText = String(currentMinutes) }
+                .onChange(of: store.plan.int("intervalMinutes")) { _ in if !minutesFocused { minutesText = String(currentMinutes) } }
             }
             Button {
                 Task { do { try await store.testAll(); toast.show("已开始测试全部账号") } catch { toast.show(error.localizedDescription) } }
@@ -167,6 +182,15 @@ struct GPTView: View {
                 }
             }.disabled(store.runID != nil)
         }
+    }
+
+    private var currentMinutes: Int { store.plan.int("intervalMinutes") == 0 ? 360 : store.plan.int("intervalMinutes") }
+    private func saveMinutes() {
+        minutesFocused = false
+        guard let m = Int(minutesText.trimmingCharacters(in: .whitespaces)), m >= 1 else {
+            minutesText = String(currentMinutes); toast.show("间隔至少 1 分钟"); return
+        }
+        if m != currentMinutes { savePlan(true, m) }
     }
 
     private func savePlan(_ on: Bool, _ minutes: Int) {

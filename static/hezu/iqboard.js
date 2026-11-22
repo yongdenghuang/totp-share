@@ -129,8 +129,15 @@
   function planCard() {
     const on = !!S.plan.enabled, minutes = S.plan.intervalMinutes || 360;
     const toggle = h('input', { type: 'checkbox', checked: on, onchange: () => savePlan(toggle.checked, minutes) });
-    const sel = h('select', { disabled: !on, onchange: () => savePlan(true, +sel.value) },
-      [60, 180, 360, 720, 1440].map(m => h('option', { value: m, text: m < 1440 ? '每 ' + m / 60 + ' 小时' : '每天', selected: m === minutes })));
+    // 间隔自己填多少分钟：改完按回车或点别处就保存
+    const num = h('input', { type: 'number', min: '1', step: '1', inputmode: 'numeric', value: String(minutes), disabled: !on, 'aria-label': '间隔分钟数',
+      onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); num.blur(); } },
+      onchange: () => {
+        const m = Math.round(+num.value);
+        if (!(m >= 1)) { num.value = String(minutes); toast('间隔至少 1 分钟'); return; }
+        if (m !== minutes) savePlan(true, m);
+      } });
+    const sel = h('label', { class: 'gpt-every' + (on ? '' : ' off') }, '每', num, '分钟');
     const running = S.runId != null;
     const done = (S.run.pass || 0) + (S.run.quality_fail || 0) + (S.run.infra_error || 0) + (S.run.skipped || 0);
     return h('div', { class: 'group gpt-plan' },

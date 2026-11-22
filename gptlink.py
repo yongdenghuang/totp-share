@@ -284,7 +284,10 @@ def install(core):
     def gpt_plan_save():
         """定期测试：在 sub2api 里建 / 改一个只测糖果题、只测 GPT 账号的计划"""
         d = body()
-        minutes = max(10, min(43200, int(d.get("intervalMinutes") or 360)))
+        try:                                   # 间隔由人自己填多少分钟（至少 1 分钟，最多一年）
+            minutes = max(1, min(525600, int(d.get("intervalMinutes") or 360)))
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error="间隔要填整数分钟"), 400
         plan = {"name": PLAN_NAME, "enabled": bool(d.get("enabled")), "checks": [{"kind": "candy", "model": "auto"}],
                 "schedule_type": "interval", "interval_minutes": minutes, "scope_type": "all", "platforms": ["openai"],
                 "policy": {"mode": "consecutive", "consecutive_fails": 3, "recover_passes": 2},

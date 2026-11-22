@@ -12,6 +12,9 @@ textarea { font: inherit; color: inherit; }
 
 .gpt-plan { display: flex; align-items: center; gap: 14px; padding: 14px 16px; flex-wrap: wrap; }
 .gpt-plan select { border: 1px solid var(--line2); background: var(--panel); border-radius: 9px; padding: 6px 10px; }
+.gpt-every { display: inline-flex; align-items: center; gap: 6px; color: var(--text2, inherit); white-space: nowrap; }
+.gpt-every.off { opacity: .5; }
+.gpt-every input { width: 84px; border: 1px solid var(--line2); background: var(--panel); color: inherit; border-radius: 9px; padding: 6px 10px; font: inherit; font-variant-numeric: tabular-nums; text-align: right; }
 .gpt-switch { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .gpt-switch input { position: absolute; opacity: 0; pointer-events: none; }
 .gpt-switch .track { width: 42px; height: 24px; border-radius: 999px; background: var(--line2); position: relative; transition: background .15s; flex: none; }

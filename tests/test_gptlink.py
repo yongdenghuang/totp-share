@@ -90,7 +90,7 @@ def test_accounts_summary(ctx, monkeypatch):
 def test_plan_test_and_oauth(ctx, monkeypatch):
     fake = setup(ctx, monkeypatch)
     a = ctx.admin()
-    assert call(a, "post", f"{API}/plan", json={"enabled": True, "intervalMinutes": 5}).get_json()["plan"]["intervalMinutes"] == 10
+    assert call(a, "post", f"{API}/plan", json={"enabled": True, "intervalMinutes": 0.5}).get_json()["plan"]["intervalMinutes"] == 1
     call(a, "post", f"{API}/plan", json={"enabled": True, "intervalMinutes": 120})
     assert len(fake.plans) == 1 and fake.plans[0]["platforms"] == ["openai"] and fake.plans[0]["checks"] == [{"kind": "candy", "model": "auto"}]
     assert call(a, "post", f"{API}/test", json={}).get_json()["runId"] == 99
