@@ -130,6 +130,7 @@ def context():
 NAV_SECTIONS = [("accounts", "账号"), ("backend", "后台"), ("backup", "备份"), ("totp", "验证码")]
 NAV_ITEMS = {"accounts": [], "backend": ["cards", "vps", "gpt"], "backup": ["vault", "notes"], "totp": ["dashboard", "logs", "settings"]}
 NAV_LABEL_MAX = 20
+NAV_FIXED = {i for lst in NAV_ITEMS.values() for i in lst}   # 固定页面的小项，名字可以改（存在 names 里）；表的名字就是账本里表的名字
 
 
 def _ordered(saved, known):
@@ -181,6 +182,16 @@ def _labels(raw):
     return out
 
 
+def _names(raw):
+    """固定小项的自定义名字（只存改过的）"""
+    out = {}
+    for k, v in (raw if isinstance(raw, dict) else {}).items():
+        v = " ".join(str(v).split())[:NAV_LABEL_MAX] if isinstance(v, str) else ""
+        if k in NAV_FIXED and v:
+            out[k] = v
+    return out
+
+
 def nav_order(sheets=None):
     try:
         raw = json.loads(_core.get_setting("nav_order", "") or "{}")
@@ -191,7 +202,8 @@ def nav_order(sheets=None):
     sections = _ordered(raw.get("sections"), [k for k, _ in NAV_SECTIONS])
     items = raw.get("items") if isinstance(raw.get("items"), dict) else {}
     sheets = _sheet_ids() if sheets is None else sheets
-    return {"sections": sections, "items": _resolve(sections, items, sheets), "labels": _labels(raw.get("labels"))}
+    return {"sections": sections, "items": _resolve(sections, items, sheets), "labels": _labels(raw.get("labels")),
+            "names": _names(raw.get("names"))}
 
 
 def save_nav_order(data):
@@ -216,6 +228,10 @@ def save_nav_order(data):
         labels = dict(cur["labels"])
         labels.update({k: v for k, v in data["labels"].items() if k in NAV_ITEMS and isinstance(v, str)})
         cur["labels"] = _labels(labels)
+    if isinstance(data.get("names"), dict):        # 留空 = 恢复默认名字
+        names = dict(cur["names"])
+        names.update({k: v for k, v in data["names"].items() if isinstance(v, str)})
+        cur["names"] = _names(names)
     # 名字和默认一样的就不存，以后默认名改了也跟着变
     defaults = dict(NAV_SECTIONS)
     stored = dict(cur, labels={k: v for k, v in cur["labels"].items() if v != defaults[k]})
@@ -254,7 +270,8 @@ def shell_nav():
     order = nav_order(list(by_id))
     sections = []
     for sec in order["sections"]:
-        its = [by_id[i] if i in by_id else dict(items[i], id=i) for i in order["items"][sec]]
+        its = [by_id[i] if i in by_id else dict(items[i], id=i, default=items[i]["text"], text=order["names"].get(i, items[i]["text"]))
+               for i in order["items"][sec]]
         sections.append({"id": sec, "label": order["labels"][sec], "items": its, "newSheet": sec == "accounts"})
     return {"sections": sections}
 
@@ -441,6 +458,25 @@ def install(core):
             state["sheets"].sort(key=lambda s: pos.get(str(s.get("id")), len(pos)))
             if save_state(state, rev) is not None:
                 return jsonify(ok=True)
+        return jsonify(ok=False, error="账本正忙，请稍后再试"), 409
+
+    @app.route(API_PREFIX + "sheet-rename", methods=["POST"])
+    @api_limit
+    @login_required
+    def hezu_sheet_rename():
+        """在验证码各页、密码本页的左侧导航给表改名：直接改账本里表的名字（账本页自己改再保存）。"""
+        data = read_json() or {}
+        sid, name = data.get("id"), " ".join(str(data.get("name") or "").split())[:40]
+        if not isinstance(sid, str) or not name:
+            return jsonify(ok=False, error="参数错误"), 400
+        for _ in range(5):
+            rev, state = load_state()
+            sh = next((x for x in state.get("sheets", []) if isinstance(x, dict) and str(x.get("id")) == sid), None)
+            if sh is None:
+                return jsonify(ok=False, error="找不到这张表"), 404
+            sh["name"] = name
+            if save_state(state, rev) is not None:
+                return jsonify(ok=True, name=name)
         return jsonify(ok=False, error="账本正忙，请稍后再试"), 409
 
     @app.route(API_PREFIX + "groups", methods=["POST"])

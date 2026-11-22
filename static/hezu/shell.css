@@ -55,7 +55,7 @@
   .side .nav-sec { display: contents; }
   .side { z-index: 6; height: auto; flex-direction: row; align-items: center; padding: 8px 10px; overflow-x: auto; gap: 4px; }
   .side .brand { padding: 0 8px 0 4px; } .side .brand span { display: none; }
-  .side .nav-label { display: none; } .side .nav { width: auto; padding: 7px 11px; } .side .nav .count { display: none; }
+  .side .nav-label { display: none; } .side .nav { width: auto; padding: 7px 11px; } .side .nav .count { display: none; } .side .nav .nav-edit { display: none !important; }
   .side .side-foot { margin: 0 0 0 auto; padding: 0; border: 0; display: flex; align-items: center; }
   .side .status { display: none; }
 }
@@ -158,4 +158,11 @@ div.tinted, button.tinted { background-color: var(--tint-bg); box-shadow: inset 
 div.tinted:hover, button.tinted:hover { background-color: var(--tint-hover); }
 .group.tinted { border-color: var(--tint-line); box-shadow: inset 0 3px 0 var(--tint), var(--shadow); }
 .group.tinted:hover { background-color: var(--tint-bg); }
+/* 每一项右边的铅笔：鼠标移上去才出现，出现时数字让位 */
+.side .nav .nav-edit { display: none; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; margin: -4px -4px -4px auto; border-radius: 6px; color: inherit; opacity: .75; }
+.side .nav .nav-edit svg { width: 14px; height: 14px; }
+.side .nav .nav-edit:hover { background: rgba(255, 255, 255, .12); opacity: 1; }
+.side .nav[data-item]:hover .nav-edit { display: inline-flex; }
+.side .nav[data-item]:hover .count { display: none; }
+.side .nav-item-input { display: block; width: 100%; box-sizing: border-box; font: inherit; color: #fff; background: var(--side-hover); border: 1px solid var(--accent); border-radius: 9px; padding: 7px 10px; margin: 0; outline: none; }
 @media (hover: none) { .side .nav-rename { opacity: .5; } }

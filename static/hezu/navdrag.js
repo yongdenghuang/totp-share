@@ -1,6 +1,7 @@
 'use strict';
 // 左侧导航：拖分类名调整大分类的顺序；拖某一项调整位置，也能拖到别的分类里（放到分类名上或空白处就接在那个分类最后）。
-// 分类名双击或点铅笔可以改名。
+// 分类名双击或点铅笔可以改名；每一项鼠标移上去右边也有铅笔，点了改这一项的名字
+// （表的名字就是账本里表的名字；其他页面的名字存在服务器 nav_order 的 names 里，留空恢复默认）。
 // 用事件委托挂在 document 上：账本页每次重画导航也不用重新绑定。
 // 账本里的表的先后顺序也跟着存（hz-sheet-order 事件由账本页自己处理，其他页面直接请求服务器）。
 (function () {
@@ -35,7 +36,7 @@
   }
 
   document.addEventListener('dragstart', e => {
-    if (document.querySelector('.side .nav-label input')) return e.preventDefault();   // 正在改名
+    if (document.querySelector('.side .nav-label input, .side .nav-item-input')) return e.preventDefault();   // 正在改名
     const label = e.target.closest && e.target.closest('.side .nav-sec > .nav-label');
     const item = !label && e.target.closest && e.target.closest('.side .nav[data-item]');
     if (!label && !item) return;
@@ -89,6 +90,7 @@
     const order = Object.assign(currentOrder(), extra || {});
     const local = Object.assign({}, navState || {}, currentOrder());
     if (extra && extra.labels) local.labels = Object.assign({}, (navState || {}).labels, extra.labels);
+    if (extra && extra.names) local.names = Object.assign({}, (navState || {}).names, extra.names);
     document.dispatchEvent(new CustomEvent('hz-nav-order', { detail: local }));   // 账本页记下来，重画导航时用
     navState = local;
     post('nav-order', order, d => {
@@ -130,12 +132,59 @@
     e.preventDefault(); e.stopPropagation();
     rename(b.closest('.nav-label'));
   });
+  // 给某一项改名：输入框放在这一项的位置上（不放进链接/按钮里面，免得点输入框就跳走）
+  function renameItem(item) {
+    if (document.querySelector('.side .nav-item-input')) return;
+    const text = item.querySelector('.nav-text'), id = item.dataset.item, sheet = !!item.dataset.sheet;
+    if (!text) return;
+    const old = text.textContent;
+    const inp = document.createElement('input');
+    inp.className = 'nav-item-input'; inp.value = old; inp.maxLength = sheet ? 40 : 20; inp.setAttribute('aria-label', '名字');
+    item.hidden = true;
+    item.parentElement.insertBefore(inp, item);
+    inp.focus(); inp.select();
+    let done = false;
+    const finish = save => {
+      if (done) return; done = true;
+      const v = inp.value.replace(/\s+/g, ' ').trim();
+      inp.remove(); item.hidden = false;
+      if (!save || v === old) return;
+      if (sheet) {
+        if (!v) return;                                   // 表必须有名字
+        text.textContent = v;
+        const ev = new CustomEvent('hz-sheet-rename', { detail: { id, name: v }, cancelable: true });
+        if (document.dispatchEvent(ev)) post('sheet-rename', { id, name: v });   // 不在账本页就直接改服务器上的账本
+      } else {
+        text.textContent = v || text.dataset.default || old;
+        saveNav({ names: { [id]: v } });
+      }
+      const b = item.querySelector('.nav-edit');
+      if (b) b.setAttribute('aria-label', '给「' + text.textContent + '」改名');
+    };
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    inp.addEventListener('blur', () => finish(true));
+  }
+  // 捕获阶段接住：不让点击传到这一项本身（否则会打开那一页）
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('.side .nav-edit');
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    renameItem(b.closest('.nav[data-item]'));
+  }, true);
+
   document.addEventListener('dblclick', e => {
     const l = e.target.closest && e.target.closest('.side .nav-sec > .nav-label');
     if (l) { e.preventDefault(); rename(l); }
   });
   // 服务器画的页面：改名后把新名字同步到页面上（留空恢复默认时用得上）
   document.addEventListener('hz-nav-order', e => {
+    const names = e.detail && e.detail.names;
+    if (names) document.querySelectorAll('.side .nav[data-item]:not([data-sheet]) .nav-text').forEach(t => {
+      t.textContent = names[t.closest('.nav').dataset.item] || t.dataset.default || t.textContent;
+    });
     const labels = e.detail && e.detail.labels;
     if (!labels) return;
     document.querySelectorAll('.side .nav-sec').forEach(s => {

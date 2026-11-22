@@ -32,7 +32,7 @@
   <div class="nav-sec" data-sec="{{ sec.id }}">
    <div class="nav-label" draggable="true" title="拖动可以调整分类顺序，双击改名"><span class="nav-label-text">{{ sec.label }}</span><button class="nav-rename" type="button" title="改名" aria-label="给「{{ sec.label }}」改名">{{ icon('edit') }}</button></div>
    {% for it in sec['items'] %}
-   <a class="nav{% if here in (it.on or []) %} on{% endif %}" href="{{ it.href }}" draggable="true" data-item="{{ it.id }}"{% if it.sheet %} data-sheet="1"{% endif %} title="拖动可以调整顺序，也能拖到别的分类">{{ icon(it.icon) }}<span>{{ it.text }}</span>{% if it.count is defined %}<span class="count">{{ it.count }}</span>{% endif %}</a>
+   <a class="nav{% if here in (it.on or []) %} on{% endif %}" href="{{ it.href }}" draggable="true" data-item="{{ it.id }}"{% if it.sheet %} data-sheet="1"{% endif %} title="拖动可以调整顺序，也能拖到别的分类">{{ icon(it.icon) }}<span class="nav-text" data-default="{{ it.default or it.text }}">{{ it.text }}</span>{% if it.count is defined %}<span class="count">{{ it.count }}</span>{% endif %}<span class="nav-edit" role="button" tabindex="-1" title="改名" aria-label="给「{{ it.text }}」改名">{{ icon('edit') }}</span></a>
    {% endfor %}
    {% if sec.newSheet %}<a class="nav" href="{{ url_for('hezu_page') }}#new-sheet" title="新建一张表">{{ icon('plus') }}<span>新建表</span></a>{% endif %}
   </div>

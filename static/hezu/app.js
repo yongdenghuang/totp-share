@@ -2125,7 +2125,14 @@
     S.sheets.sort((a, b) => (pos.has(a.id) ? pos.get(a.id) : 1e9) - (pos.has(b.id) ? pos.get(b.id) : 1e9));
     touch(); render();
   });
-  document.addEventListener('hz-nav-order', e => { NAV = Object.assign({}, NAV, e.detail, { labels: Object.assign({}, NAV.labels, e.detail.labels) }); });
+  document.addEventListener('hz-nav-order', e => { NAV = Object.assign({}, NAV, e.detail, { labels: Object.assign({}, NAV.labels, e.detail.labels), names: e.detail.names || NAV.names }); });
+  // 左侧导航里给表改名：就是改账本里表的名字
+  document.addEventListener('hz-sheet-rename', e => {
+    const sh = S.sheets.find(x => x.id === e.detail.id);
+    if (!sh) return;
+    e.preventDefault();
+    sh.name = e.detail.name; touch(); render();
+  });
   // 左侧导航的四个大分类，按 NAV 里存的顺序和名字画；小项可以在分类之间拖。和服务器画的 templates/_shell.html 保持一致（hezu.py 的 _resolve）
   function navSections(nav, link, M) {
     const drag = el => { el.draggable = true; el.title = '拖动可以调整顺序，也能拖到别的分类'; return el; };
@@ -2148,6 +2155,11 @@
         const s = sheetById.get(id);
         const el = drag(s ? nav(s.id, s.name, s.grouped ? 'users' : s.mode === 'resale' ? 'bolt' : 'play', M.rows[s.id].length) : items[id]());
         el.dataset.item = id; if (s) el.dataset.sheet = '1';
+        // 名字可以改（navdrag.js）：表改的是账本里表的名字，固定页面的名字存在 NAV.names
+        const txt = el.querySelector('svg + span');
+        txt.classList.add('nav-text'); txt.dataset.default = txt.textContent;
+        if (!s && (NAV.names || {})[id]) txt.textContent = NAV.names[id];
+        el.append(h('span', { class: 'nav-edit', role: 'button', tabindex: '-1', title: '改名', 'aria-label': '给「' + txt.textContent + '」改名' }, icon('edit', 14)));
         return el;
       });
       if (k === 'accounts') kids.push(h('button', { class: 'nav', type: 'button', title: '新建一张表', onclick: () => sheetForm(null) }, icon('plus'), h('span', { text: '新建表' })));

@@ -38,7 +38,7 @@ def test_pages_render_with_shared_sidebar(ctx):
     for page, active in (("/admin/vault", "密码本"), ("/admin/notes", "备忘录")):
         html = call(c, "get", page).get_data(as_text=True)
         assert 'class="side"' in html and "hezu/vault.js" in html and 'data-csrf="' in html
-        assert html.split('class="nav on"', 1)[1].split("</a>", 1)[0].count(active) == 1
+        assert html.split('class="nav on"', 1)[1].split("</a>", 1)[0].count(f">{active}<") == 1
     dash = call(c, "get", "/admin/dashboard").get_data(as_text=True)
     assert 'href="/admin/vault"' in dash and 'href="/admin/notes"' in dash
 
@@ -210,3 +210,20 @@ def test_sidebar_cross_section_and_rename(ctx):
     call(c, "put", f"{api}/state", json={"rev": st["rev"], "state": {"sheets": [{"id": "a", "name": "A"}, {"id": "n", "name": "N"}], "months": {}, "vps": []}})
     o = call(c, "get", f"{api}/context").get_json()["navOrder"]
     assert o["items"]["totp"] == ["dashboard", "logs", "settings"] and o["items"]["accounts"] == ["a", "cards", "n"]
+
+
+def test_sidebar_item_rename(ctx):
+    c = ctx.admin()
+    api = "/admin/hezu/api"
+    call(c, "put", f"{api}/state", json={"rev": 0, "state": {"sheets": [{"id": "a", "name": "A"}], "months": {}, "vps": []}})
+    o = call(c, "post", f"{api}/nav-order", json={"names": {"vps": " 我的  服务器 ", "gpt": "x" * 50, "a": "不能这样改表", "bogus": "y"}}).get_json()["navOrder"]
+    assert o["names"] == {"vps": "我的 服务器", "gpt": "x" * 20}
+    html = call(c, "get", "/admin/vault").get_data(as_text=True)
+    assert 'data-default="VPS">我的 服务器<' in html
+    o = call(c, "post", f"{api}/nav-order", json={"names": {"vps": ""}}).get_json()["navOrder"]
+    assert o["names"] == {"gpt": "x" * 20}
+    # 表的名字：直接改账本
+    assert call(c, "post", f"{api}/sheet-rename", json={"id": "a", "name": " 新 名字 "}).get_json()["name"] == "新 名字"
+    assert call(c, "get", f"{api}/state").get_json()["state"]["sheets"][0]["name"] == "新 名字"
+    assert call(c, "post", f"{api}/sheet-rename", json={"id": "a", "name": "  "}).status_code == 400
+    assert call(c, "post", f"{api}/sheet-rename", json={"id": "zz", "name": "x"}).status_code == 404

@@ -366,6 +366,9 @@ extension LedgerStore {
         if let lb = body["labels"] as? [String: String] {
             var cur = n.dict("labels"); for (k, v) in lb { cur[k] = v }; n["labels"] = cur
         }
+        if let nm = body["names"] as? [String: String] {
+            var cur = n.dict("names"); for (k, v) in nm { cur[k] = v }; n["names"] = cur
+        }
         nav = n
         do {
             let d = try await api.post("/admin/hezu/api/nav-order", body)
@@ -398,6 +401,22 @@ extension LedgerStore {
     /// 改名；留空恢复默认名字
     func navRename(_ sec: String, _ name: String) async {
         await saveNav(["labels": [sec: name.split(whereSeparator: \.isWhitespace).joined(separator: " ")]])
+    }
+    /// 固定页面（支付卡、VPS…）改过的名字；没改过是 nil
+    func navName(_ appID: String) -> String? {
+        let v = (nav.dict("names")[Self.webID(appID)] as? String) ?? ""
+        return v.isEmpty ? nil : v
+    }
+    /// 给左栏某一项改名：表改的是账本里表的名字；固定页面的名字存到服务器，留空恢复默认
+    func navRenameItem(_ appID: String, _ name: String) async {
+        let v = name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if appID.hasPrefix("sheet:") {
+            let sid = String(appID.dropFirst(6))
+            guard !v.isEmpty, let mode = sheet(sid)?.str("mode") else { return }
+            edit { $0.updateSheet(id: sid, name: String(v.prefix(40)), mode: mode) }
+        } else {
+            await saveNav(["names": [Self.webID(appID): String(v.prefix(20))]])
+        }
     }
     /// 「表设置」里调整了表的顺序：每个板块里的表按新顺序排，别的小项不动
     func navApplySheetOrder(_ order: [String]) async {

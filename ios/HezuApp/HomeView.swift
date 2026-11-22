@@ -255,11 +255,12 @@ struct MoreView: View {
     @State private var confirmLogout = false
     @State private var renaming: NavSection?
     @State private var renameText = ""
+    @State private var renamingItem: String?
 
     var body: some View {
         List {
             // 和网页左侧导航一样的几个板块：名字、顺序、每个板块里有什么都同步。
-            // 点板块名旁边的铅笔改名；长按某一项可以上移、下移、移到别的板块
+            // 点板块名旁边的铅笔改名；长按某一项可以改名、上移、下移、移到别的板块
             ForEach(ledger.navSections) { sec in
                 Section {
                     ForEach(sec.items, id: \.self) { id in
@@ -310,6 +311,14 @@ struct MoreView: View {
                 renaming = nil
             }
         } message: { Text("网页和 App 的左栏一起改。留空恢复默认名字。") }
+        .alert("改名", isPresented: Binding(get: { renamingItem != nil }, set: { if !$0 { renamingItem = nil } })) {
+            TextField("名字", text: $renameText)
+            Button("取消", role: .cancel) { renamingItem = nil }
+            Button("保存") {
+                if let id = renamingItem { let v = renameText; Task { await ledger.navRenameItem(id, v) } }
+                renamingItem = nil
+            }
+        } message: { Text(renamingItem?.hasPrefix("sheet:") == true ? "就是这张表的名字，网页和 App 一起改。" : "网页和 App 的左栏一起改。留空恢复默认名字。") }
         .confirmationDialog("退出登录？", isPresented: $confirmLogout, titleVisibility: .visible) {
             Button("退出登录", role: .destructive) { Task { await api.logout() } }
         } message: { Text("下次打开 App 要重新输入用户名和密码。") }
@@ -317,6 +326,10 @@ struct MoreView: View {
 
     @ViewBuilder
     private func itemMenu(_ id: String, _ sec: NavSection) -> some View {
+        Button {
+            renameText = moduleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt).title
+            renamingItem = id
+        } label: { Label("改名…", systemImage: "pencil") }
         Button { Task { await ledger.navShift(id, by: -1) } } label: { Label("上移", systemImage: "arrow.up") }.disabled(sec.items.first == id)
         Button { Task { await ledger.navShift(id, by: 1) } } label: { Label("下移", systemImage: "arrow.down") }.disabled(sec.items.last == id)
         Menu {

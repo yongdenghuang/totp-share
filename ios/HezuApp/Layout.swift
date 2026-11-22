@@ -87,6 +87,14 @@ extension LedgerStore {
 /// 模块的名字、图标、颜色、数量
 @MainActor
 func moduleInfo(_ id: String, ledger: LedgerStore, codes: CodesStore, vault: VaultStore, notes: NotesStore, gpt: GPTStore) -> ModuleInfo {
+    let m = defaultModuleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt)
+    // 在网页或 App 左栏里改过名字的，用改过的名字（和网页同步）
+    if let n = ledger.navName(id), !id.hasPrefix("sheet:") { return ModuleInfo(title: n, sub: m.sub, icon: m.icon, color: m.color) }
+    return m
+}
+
+@MainActor
+private func defaultModuleInfo(_ id: String, ledger: LedgerStore, codes: CodesStore, vault: VaultStore, notes: NotesStore, gpt: GPTStore) -> ModuleInfo {
     let purple = Color(red: 0.43, green: 0.36, blue: 0.96)
     switch id {
     case "codes": return ModuleInfo(title: "验证码", sub: "\(codes.accounts.count) 个", icon: "key.horizontal.fill", color: Color(red: 0.05, green: 0.58, blue: 0.53))

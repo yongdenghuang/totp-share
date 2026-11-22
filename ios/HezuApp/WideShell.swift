@@ -31,6 +31,7 @@ struct WideShell: View {
     @AppStorage("wide_sorting") private var sorting = false   // 「排序」模式：每行右边出现拖动把手
     @State private var renaming: NavSection?                  // 正在改名的板块
     @State private var renameText = ""
+    @State private var renamingItem: String?                  // 正在改名的那一项（模块 id）
 
     /// 全部入口（「更多」固定在最下面）
     private var allIDs: [String] { ["home"] + ledger.navSections.flatMap(\.items) }
@@ -105,6 +106,14 @@ struct WideShell: View {
                     renaming = nil
                 }
             } message: { Text("网页和 App 的左栏一起改。留空恢复默认名字。") }
+            .alert("改名", isPresented: Binding(get: { renamingItem != nil }, set: { if !$0 { renamingItem = nil } })) {
+                TextField("名字", text: $renameText)
+                Button("取消", role: .cancel) { renamingItem = nil }
+                Button("保存") {
+                    if let id = renamingItem { let v = renameText; Task { await ledger.navRenameItem(id, v) } }
+                    renamingItem = nil
+                }
+            } message: { Text(renamingItem?.hasPrefix("sheet:") == true ? "就是这张表的名字，网页和 App 一起改。" : "网页和 App 的左栏一起改。留空恢复默认名字。") }
             .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
             .background(shortcuts)
         } detail: {
@@ -157,6 +166,10 @@ struct WideShell: View {
                 }
             }
             if id != "home", let cur = ledger.navSection(of: id) {
+                Button {
+                    renameText = moduleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt).title
+                    renamingItem = id
+                } label: { Label("改名…", systemImage: "pencil") }
                 Menu {
                     ForEach(ledger.navSections.filter { $0.id != cur.id }) { s in
                         Button(s.label) { Task { await ledger.navMove(id, to: s.id) } }
