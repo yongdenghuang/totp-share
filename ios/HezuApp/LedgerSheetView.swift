@@ -27,6 +27,8 @@ struct LedgerSheetView: View {
     @State private var confirmArchive = false
     @State private var deleting: JSON?
     @State private var sheetSettings = false
+    @State private var pwEdit: EditAction?            // 改密码（和验证码页同一个弹窗）
+    @State private var webPage: WebPage?             // 编辑密钥 / 分享密码（网页）
     @Environment(\.dismiss) private var dismissView
 
     private var sheet: JSON { ledger.sheet(sheetID) ?? [:] }
@@ -114,6 +116,9 @@ struct LedgerSheetView: View {
         .sheet(item: $editing) { ref in
             RowEditor(sheetID: sheetID, ym: month, rowID: ref.id, presetGroup: ref.preset, editable: editable)
         }
+        .sheet(item: $pwEdit, onDismiss: { Task { await ledger.load() } }) { EditTextSheet(action: $0) }
+        .sheet(item: $webPage) { p in NavigationStack { EmbeddedWeb(path: p.path).navigationTitle(p.title).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { webPage = nil; Task { await codes.load(); await ledger.load() } } } } } }
         .sheet(isPresented: $sheetSettings) { SheetForm(sheetID: sheetID, onDeleted: { dismissView() }) }
         .alert("归档并开始 \(ymLabel(nextYM(month)))？", isPresented: $confirmArchive) {
             Button("取消", role: .cancel) {}
@@ -243,6 +248,16 @@ struct LedgerSheetView: View {
             if let c = codes.codes[a.id] { Button { toast.copy(c, "已复制验证码") } label: { Label("复制验证码", systemImage: "number") } }
             if a.hasPassword { Button { copyTotpPassword(a.id) } label: { Label("复制账号密码", systemImage: "key") } }
             Button { copyShare(a.id) } label: { Label("复制分享信息", systemImage: "text.bubble") }
+            // 和验证码账号页一样的操作
+            if let t = codes.accounts.first(where: { $0.id == a.id }) {
+                Button { toast.copy(t.shareUrl, "已复制分享链接") } label: { Label("复制分享链接", systemImage: "link") }
+                Divider()
+                Button { pwEdit = .password(t) } label: { Label(t.hasPassword ? "改密码" : "设置密码", systemImage: "key.viewfinder") }
+                Button { Task { do { let u = try await codes.regen(t); toast.copy(u, "已换新链接并复制") } catch { toast.show(error.localizedDescription) } } } label: {
+                    Label("换一个分享链接", systemImage: "arrow.triangle.2.circlepath")
+                }
+                Button { webPage = WebPage(title: "编辑 \(t.name)", path: "/admin/accounts/\(t.id)/edit") } label: { Label("编辑密钥 / 分享密码…", systemImage: "slider.horizontal.3") }
+            }
         } else if !r.str("password").isEmpty {
             Button { toast.copy(r.str("password"), "已复制密码") } label: { Label("复制账号密码", systemImage: "key") }
         }
