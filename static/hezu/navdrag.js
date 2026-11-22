@@ -87,10 +87,15 @@
   }
   let navState = null;   // 服务器回来的完整顺序和名字（账本页重画时用）
   function saveNav(extra) {
+    document.querySelectorAll('.side .nav-sec').forEach(sec => {   // 折叠时显示的数量
+      const c = sec.querySelector('.nav-fold-count'); if (c) c.textContent = String(itemsOf(sec).length);
+    });
     const order = Object.assign(currentOrder(), extra || {});
     const local = Object.assign({}, navState || {}, currentOrder());
     if (extra && extra.labels) local.labels = Object.assign({}, (navState || {}).labels, extra.labels);
     if (extra && extra.names) local.names = Object.assign({}, (navState || {}).names, extra.names);
+    if (extra && extra.collapsed) local.collapsed = extra.collapsed;
+    if (extra && extra.colors) local.colors = Object.assign({}, (navState || {}).colors, extra.colors);
     document.dispatchEvent(new CustomEvent('hz-nav-order', { detail: local }));   // 账本页记下来，重画导航时用
     navState = local;
     post('nav-order', order, d => {
@@ -98,7 +103,9 @@
     });
   }
 
-  // ---- 改名 ----
+  // ---- 改名、换颜色 ----
+  const COLORS = ['purple', 'blue', 'teal', 'amber', 'pink', 'green', 'red', 'gray'];
+  const COLOR_NAMES = { purple: '紫', blue: '蓝', teal: '青', amber: '橙', pink: '粉', green: '绿', red: '红', gray: '灰' };
   function rename(label) {
     if (label.querySelector('input')) return;
     const text = label.querySelector('.nav-label-text'), sec = label.parentElement.dataset.sec;
@@ -107,12 +114,30 @@
     inp.className = 'nav-label-input'; inp.value = old; inp.maxLength = 20; inp.setAttribute('aria-label', '分类名');
     label.draggable = false; label.classList.add('editing');
     text.hidden = true; label.insertBefore(inp, text);
+    // 改名时下面出一排颜色，点一下就换这个板块的颜色
+    const secEl = label.parentElement;
+    const dots = document.createElement('div');
+    dots.className = 'nav-colors';
+    COLORS.forEach(c => {
+      const d = document.createElement('button');
+      d.type = 'button'; d.className = 'nav-color' + (secEl.dataset.color === c ? ' on' : ''); d.dataset.c = c;
+      d.title = COLOR_NAMES[c]; d.setAttribute('aria-label', '颜色：' + COLOR_NAMES[c]);
+      d.addEventListener('mousedown', e => e.preventDefault());      // 不让输入框失去焦点
+      d.addEventListener('click', e => {
+        e.stopPropagation();
+        secEl.dataset.color = c;
+        dots.querySelectorAll('.nav-color').forEach(x => x.classList.toggle('on', x === d));
+        saveNav({ colors: { [sec]: c } });
+      });
+      dots.appendChild(d);
+    });
+    label.after(dots);
     inp.focus(); inp.select();
     let done = false;
     const finish = save => {
       if (done) return; done = true;
       const v = inp.value.replace(/\s+/g, ' ').trim();
-      inp.remove(); text.hidden = false; label.draggable = true; label.classList.remove('editing');
+      inp.remove(); dots.remove(); text.hidden = false; label.draggable = true; label.classList.remove('editing');
       if (!save || v === old) return;
       text.textContent = v || old;   // 留空 = 恢复默认名字，服务器回来后会更新
       const btn = label.querySelector('.nav-rename');
@@ -174,6 +199,26 @@
     e.preventDefault(); e.stopPropagation();
     renameItem(b.closest('.nav[data-item]'));
   }, true);
+
+  // ---- 折叠 / 展开 ----
+  // 点板块名折叠：只留板块名（右边显示有几项），当前打开的那一项照样显示。网页和 App 一起记住。
+  function toggleSec(sec) {
+    const folded = sec.classList.toggle('collapsed');
+    const label = sec.querySelector('.nav-label');
+    if (label) label.setAttribute('aria-expanded', folded ? 'false' : 'true');
+    const collapsed = Array.from(document.querySelectorAll('.side .nav-sec.collapsed')).map(s => s.dataset.sec);
+    saveNav({ collapsed });
+  }
+  document.addEventListener('click', e => {
+    const l = e.target.closest && e.target.closest('.side .nav-sec > .nav-label');
+    if (!l || e.target.closest('.nav-rename, input') || l.querySelector('input')) return;
+    toggleSec(l.parentElement);
+  });
+  document.addEventListener('keydown', e => {
+    const l = e.target.closest && e.target.closest('.side .nav-sec > .nav-label');
+    if (!l || e.target !== l || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault(); toggleSec(l.parentElement);
+  });
 
   document.addEventListener('dblclick', e => {
     const l = e.target.closest && e.target.closest('.side .nav-sec > .nav-label');

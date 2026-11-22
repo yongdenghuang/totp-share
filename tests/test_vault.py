@@ -227,3 +227,25 @@ def test_sidebar_item_rename(ctx):
     assert call(c, "get", f"{api}/state").get_json()["state"]["sheets"][0]["name"] == "新 名字"
     assert call(c, "post", f"{api}/sheet-rename", json={"id": "a", "name": "  "}).status_code == 400
     assert call(c, "post", f"{api}/sheet-rename", json={"id": "zz", "name": "x"}).status_code == 404
+
+
+def test_sidebar_collapse(ctx):
+    c = ctx.admin()
+    api = "/admin/hezu/api"
+    o = call(c, "post", f"{api}/nav-order", json={"collapsed": ["accounts", "totp", "bogus", "totp"]}).get_json()["navOrder"]
+    assert o["collapsed"] == ["accounts", "totp"]
+    html = call(c, "get", "/admin/vault").get_data(as_text=True)
+    assert 'class="nav-sec collapsed" data-sec="accounts"' in html and 'class="nav-sec" data-sec="backup"' in html
+    assert call(c, "get", f"{api}/context").get_json()["navOrder"]["collapsed"] == ["accounts", "totp"]
+    o = call(c, "post", f"{api}/nav-order", json={"collapsed": []}).get_json()["navOrder"]
+    assert o["collapsed"] == []
+
+
+def test_sidebar_colors(ctx):
+    c = ctx.admin()
+    api = "/admin/hezu/api"
+    o = call(c, "get", f"{api}/context").get_json()["navOrder"]
+    assert o["colors"] == {"accounts": "purple", "backend": "blue", "backup": "amber", "totp": "teal"}
+    o = call(c, "post", f"{api}/nav-order", json={"colors": {"backend": "pink", "totp": "nope", "bogus": "red"}}).get_json()["navOrder"]
+    assert o["colors"]["backend"] == "pink" and o["colors"]["totp"] == "teal" and "bogus" not in o["colors"]
+    assert 'data-sec="backend" data-color="pink"' in call(c, "get", "/admin/vault").get_data(as_text=True)

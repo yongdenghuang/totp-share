@@ -262,8 +262,9 @@ struct MoreView: View {
             // 和网页左侧导航一样的几个板块：名字、顺序、每个板块里有什么都同步。
             // 点板块名旁边的铅笔改名；长按某一项可以改名、上移、下移、移到别的板块
             ForEach(ledger.navSections) { sec in
+                let folded = ledger.navCollapsed.contains(sec.id)
                 Section {
-                    ForEach(sec.items, id: \.self) { id in
+                    ForEach(folded ? [] : sec.items, id: \.self) { id in
                         let m = moduleInfo(id, ledger: ledger, codes: codes, vault: vault, notes: notes, gpt: gpt)
                         NavigationLink { ModuleView(id: id) } label: { Label(m.title, systemImage: m.icon) }
                             .contextMenu { itemMenu(id, sec) }
@@ -274,8 +275,27 @@ struct MoreView: View {
                     }
                 } header: {
                     HStack {
-                        Text(sec.label).font(.subheadline.weight(.bold)).foregroundStyle(.primary)
+                        // 点板块名折叠 / 展开（和网页、Mac 一起记住）
+                        Button { withAnimation { Task { await ledger.navToggle(sec.id) } } } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "chevron.down").font(.caption.weight(.bold))
+                                    .rotationEffect(.degrees(folded ? -90 : 0)).foregroundStyle(.secondary)
+                                Text(sec.label).font(.subheadline.weight(.bold)).foregroundStyle(ledger.navColor(sec.id))
+                                if folded { Text("\(sec.items.count)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 7).padding(.vertical, 1).background(Color.secondary.opacity(0.15), in: Capsule()) }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).accessibilityLabel((folded ? "展开" : "折叠") + "「\(sec.label)」")
                         Spacer()
+                        Menu {
+                            ForEach(LedgerStore.navColorList, id: \.key) { c in
+                                Button { Task { await ledger.navSetColor(sec.id, c.key) } } label: {
+                                    Label(c.name + (ledger.navColorKey(sec.id) == c.key ? " ✓" : ""), systemImage: "circle.fill")
+                                }
+                            }
+                        } label: { Image(systemName: "paintpalette").font(.subheadline).foregroundStyle(ledger.navColor(sec.id)) }
+                            .accessibilityLabel("换「\(sec.label)」的颜色")
                         Button { renameText = sec.label; renaming = sec } label: { Image(systemName: "pencil").font(.subheadline) }
                             .buttonStyle(.borderless).accessibilityLabel("给「\(sec.label)」改名")
                     }

@@ -41,7 +41,11 @@ struct WideShell: View {
     private var groups: [(key: String, title: String, ids: [String])] {
         [("pins", "常用", pins)]
         + (pins.contains("home") ? [] : [("top", "", ["home"])])
-        + ledger.navSections.map { ("nav:" + $0.id, $0.label, $0.items.filter { !pins.contains($0) }) }
+        + ledger.navSections.map { s in
+            let ids = s.items.filter { !pins.contains($0) }
+            // 折叠起来的板块只留当前打开的那一项
+            return ("nav:" + s.id, s.label, ledger.navCollapsed.contains(s.id) ? ids.filter { $0 == selection } : ids)
+        }
         + [("more", "", ["more"])]
     }
     private func navID(_ key: String) -> String? { key.hasPrefix("nav:") ? String(key.dropFirst(4)) : nil }
@@ -77,7 +81,20 @@ struct WideShell: View {
                             }
                         } else if let sec = navID(g.key), let n = ledger.navSections.first(where: { $0.id == sec }) {
                             HStack {
-                                Text(g.title).font(.system(size: 13, weight: .bold)).foregroundStyle(.secondary)
+                                let folded = ledger.navCollapsed.contains(sec)
+                                Button {
+                                    withAnimation { Task { await ledger.navToggle(sec) } }
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+                                            .rotationEffect(.degrees(folded ? -90 : 0)).foregroundStyle(.tertiary)
+                                        Text(g.title).font(.system(size: 13, weight: .bold)).foregroundStyle(ledger.navColor(sec))
+                                        if folded { Text("\(n.items.count)").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                                            .padding(.horizontal, 6).padding(.vertical, 1).background(Color.secondary.opacity(0.15), in: Capsule()) }
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain).help(folded ? "展开" : "折叠").accessibilityLabel((folded ? "展开" : "折叠") + "「\(g.title)」")
                                 Spacer()
                                 if sorting {
                                     Button { startRename(n) } label: { Image(systemName: "pencil") }
@@ -86,7 +103,10 @@ struct WideShell: View {
                             }
                             .textCase(nil)
                             .contentShape(Rectangle())
-                            .contextMenu { Button { startRename(n) } label: { Label("改名…", systemImage: "pencil") } }
+                            .contextMenu {
+                                Button { startRename(n) } label: { Label("改名…", systemImage: "pencil") }
+                                colorMenu(sec)
+                            }
                         } else if !g.title.isEmpty { Text(g.title) }
                     } footer: {
                         if g.key == "pins" && !g.ids.isEmpty {
@@ -139,6 +159,16 @@ struct WideShell: View {
     }
 
     private func startRename(_ n: NavSection) { renameText = n.label; renaming = n }
+    /// 换板块颜色（网页和 App 一起变）
+    private func colorMenu(_ sec: String) -> some View {
+        Menu {
+            ForEach(LedgerStore.navColorList, id: \.key) { c in
+                Button { Task { await ledger.navSetColor(sec, c.key) } } label: {
+                    Label(c.name + (ledger.navColorKey(sec) == c.key ? " ✓" : ""), systemImage: "circle.fill")
+                }
+            }
+        } label: { Label("颜色", systemImage: "paintpalette") }
+    }
 
     /// 同一组里拖动排序（板块里的顺序存到服务器，网页也跟着变）
     private func move(_ g: (key: String, title: String, ids: [String]), from: IndexSet, to: Int) {

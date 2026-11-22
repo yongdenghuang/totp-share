@@ -366,6 +366,10 @@ extension LedgerStore {
         if let lb = body["labels"] as? [String: String] {
             var cur = n.dict("labels"); for (k, v) in lb { cur[k] = v }; n["labels"] = cur
         }
+        if let c = body["collapsed"] as? [String] { n["collapsed"] = c }
+        if let cl = body["colors"] as? [String: String] {
+            var cur = n.dict("colors"); for (k, v) in cl { cur[k] = v }; n["colors"] = cur
+        }
         if let nm = body["names"] as? [String: String] {
             var cur = n.dict("names"); for (k, v) in nm { cur[k] = v }; n["names"] = cur
         }
@@ -401,6 +405,24 @@ extension LedgerStore {
     /// 改名；留空恢复默认名字
     func navRename(_ sec: String, _ name: String) async {
         await saveNav(["labels": [sec: name.split(whereSeparator: \.isWhitespace).joined(separator: " ")]])
+    }
+    /// 板块颜色（和网页一样的几种），左栏的板块名用它
+    static let navColorList: [(key: String, name: String, color: Color)] = [
+        ("purple", "紫", Color(red: 0.55, green: 0.42, blue: 0.98)), ("blue", "蓝", Color(red: 0.23, green: 0.55, blue: 0.96)),
+        ("teal", "青", Color(red: 0.05, green: 0.65, blue: 0.56)), ("amber", "橙", Color(red: 0.93, green: 0.6, blue: 0.05)),
+        ("pink", "粉", Color(red: 0.91, green: 0.33, blue: 0.62)), ("green", "绿", Color(red: 0.33, green: 0.68, blue: 0.2)),
+        ("red", "红", Color(red: 0.92, green: 0.33, blue: 0.33)), ("gray", "灰", Color(red: 0.5, green: 0.54, blue: 0.62))]
+    private static let navDefaultColors = ["accounts": "purple", "backend": "blue", "backup": "amber", "totp": "teal"]
+    func navColorKey(_ sec: String) -> String { (nav.dict("colors")[sec] as? String) ?? Self.navDefaultColors[sec] ?? "gray" }
+    func navColor(_ sec: String) -> Color { Self.navColorList.first { $0.key == navColorKey(sec) }?.color ?? .secondary }
+    func navSetColor(_ sec: String, _ key: String) async { await saveNav(["colors": [sec: key]]) }
+
+    /// 折叠起来的板块（只显示板块名和数量，当前打开的那一项照样显示）。网页和 App 一起记住
+    var navCollapsed: Set<String> { Set((nav["collapsed"] as? [String]) ?? []) }
+    func navToggle(_ sec: String) async {
+        var c = (nav["collapsed"] as? [String]) ?? []
+        if let i = c.firstIndex(of: sec) { c.remove(at: i) } else { c.append(sec) }
+        await saveNav(["collapsed": c])
     }
     /// 固定页面（支付卡、VPS…）改过的名字；没改过是 nil
     func navName(_ appID: String) -> String? {

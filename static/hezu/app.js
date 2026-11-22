@@ -4,6 +4,7 @@
   const SEED_ISSUERS = [['Wise', ''], ['Maya Bank', '菲律宾'], ['PalawanPay', '菲律宾'], ['Revolut', ''], ['PayPal', ''], ['Krak', ''], ['Bybit EU', '欧洲'], ['Moniepoint', '尼日利亚']];
   const COUNTRY_GUESS = { mayabank: '菲律宾', maya: '菲律宾', palawanpay: '菲律宾', moniepoint: '尼日利亚', paga: '尼日利亚', bybiteu: '欧洲' };
   const ICONS = {
+    chev: '<path d="m6 9 6 6 6-6"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
@@ -2221,7 +2222,7 @@
     S.sheets.sort((a, b) => (pos.has(a.id) ? pos.get(a.id) : 1e9) - (pos.has(b.id) ? pos.get(b.id) : 1e9));
     touch(); render();
   });
-  document.addEventListener('hz-nav-order', e => { NAV = Object.assign({}, NAV, e.detail, { labels: Object.assign({}, NAV.labels, e.detail.labels), names: e.detail.names || NAV.names }); });
+  document.addEventListener('hz-nav-order', e => { NAV = Object.assign({}, NAV, e.detail, { labels: Object.assign({}, NAV.labels, e.detail.labels), names: e.detail.names || NAV.names, collapsed: e.detail.collapsed || NAV.collapsed, colors: Object.assign({}, NAV.colors, e.detail.colors) }); });
   // 左侧导航里给表改名：就是改账本里表的名字
   document.addEventListener('hz-sheet-rename', e => {
     const sh = S.sheets.find(x => x.id === e.detail.id);
@@ -2259,9 +2260,10 @@
         return el;
       });
       if (k === 'accounts') kids.push(h('button', { class: 'nav', type: 'button', title: '新建一张表', onclick: () => sheetForm(null) }, icon('plus'), h('span', { text: '新建表' })));
-      const name = ((NAV.labels || {})[k]) || labels[k];
-      return h('div', { class: 'nav-sec', 'data-sec': k }, h('div', { class: 'nav-label', draggable: 'true', title: '拖动可以调整分类顺序，双击改名' },
-        h('span', { class: 'nav-label-text', text: name }), h('button', { class: 'nav-rename', type: 'button', title: '改名', 'aria-label': '给「' + name + '」改名' }, icon('edit', 13))), kids);
+      const name = ((NAV.labels || {})[k]) || labels[k], folded = (NAV.collapsed || []).includes(k);
+      const color = (NAV.colors || {})[k] || { accounts: 'purple', backend: 'blue', backup: 'amber', totp: 'teal' }[k];
+      return h('div', { class: 'nav-sec' + (folded ? ' collapsed' : ''), 'data-sec': k, 'data-color': color }, h('div', { class: 'nav-label', draggable: 'true', role: 'button', tabindex: '0', 'aria-expanded': folded ? 'false' : 'true', title: '点一下折叠 / 展开，拖动调整分类顺序，双击改名' },
+        h('span', { class: 'nav-fold' }, icon('chev', 14)), h('span', { class: 'nav-label-text', text: name }), h('span', { class: 'nav-fold-count', text: String(place[k].length) }), h('button', { class: 'nav-rename', type: 'button', title: '改名', 'aria-label': '给「' + name + '」改名' }, icon('edit', 13))), kids);
     });
   }
   function render() {

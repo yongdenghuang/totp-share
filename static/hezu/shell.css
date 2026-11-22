@@ -55,7 +55,7 @@
   .side .nav-sec { display: contents; }
   .side { z-index: 6; height: auto; flex-direction: row; align-items: center; padding: 8px 10px; overflow-x: auto; gap: 4px; }
   .side .brand { padding: 0 8px 0 4px; } .side .brand span { display: none; }
-  .side .nav-label { display: none; } .side .nav { width: auto; padding: 7px 11px; } .side .nav .count { display: none; } .side .nav .nav-edit { display: none !important; }
+  .side .nav-label { display: none; } .side .nav { width: auto; padding: 7px 11px; } .side .nav .count { display: none; } .side .nav .nav-edit { display: none !important; } .side .nav-sec.collapsed > .nav { display: flex !important; }
   .side .side-foot { margin: 0 0 0 auto; padding: 0; border: 0; display: flex; align-items: center; }
   .side .status { display: none; }
 }
@@ -165,4 +165,29 @@ div.tinted:hover, button.tinted:hover { background-color: var(--tint-hover); }
 .side .nav[data-item]:hover .nav-edit { display: inline-flex; }
 .side .nav[data-item]:hover .count { display: none; }
 .side .nav-item-input { display: block; width: 100%; box-sizing: border-box; font: inherit; color: #fff; background: var(--side-hover); border: 1px solid var(--accent); border-radius: 9px; padding: 7px 10px; margin: 0; outline: none; }
+/* 折叠板块：点板块名收起，只留名字和数量；当前打开的那一项照样显示 */
+.side .nav-label { cursor: pointer; user-select: none; }
+.side .nav-fold { display: inline-flex; width: 14px; margin-left: -4px; opacity: .55; transition: transform .15s; }
+.side .nav-fold svg { width: 14px; height: 14px; }
+.side .nav-sec.collapsed .nav-fold { transform: rotate(-90deg); }
+.side .nav-fold-count { display: none; font-size: 12px; font-weight: 500; letter-spacing: 0; opacity: .7; padding: 0 7px; border-radius: 999px; background: rgba(255, 255, 255, .08); }
+.side .nav-sec.collapsed .nav-fold-count { display: inline-block; }
+.side .nav-sec.collapsed > .nav:not(.on):not(.dragging) { display: none; }
+/* 每个板块一个颜色：板块名、图标、选中时的底色 */
+.side .nav-sec { --sec: #a5b4fc; }
+.side .nav-sec[data-color="purple"] { --sec: #b49cff; } .side .nav-sec[data-color="blue"] { --sec: #6cb2ff; }
+.side .nav-sec[data-color="teal"] { --sec: #3fd1b6; } .side .nav-sec[data-color="amber"] { --sec: #fbbf4d; }
+.side .nav-sec[data-color="pink"] { --sec: #f68cc4; } .side .nav-sec[data-color="green"] { --sec: #7bd66a; }
+.side .nav-sec[data-color="red"] { --sec: #ff8a8a; } .side .nav-sec[data-color="gray"] { --sec: #aab2c8; }
+.side .nav-sec > .nav-label { color: var(--sec); }
+.side .nav-sec > .nav svg:first-child { color: var(--sec); }
+.side .nav-sec > .nav.on { background: color-mix(in srgb, var(--sec) 26%, transparent); }
+.side .nav-sec > .nav.on svg:first-child { color: #fff; }
+.side .nav-colors { display: flex; gap: 7px; padding: 2px 10px 6px 14px; }
+.side .nav-color { width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.side .nav-color.on { border-color: #fff; }
+.side .nav-color[data-c="purple"] { background: #b49cff; } .side .nav-color[data-c="blue"] { background: #6cb2ff; }
+.side .nav-color[data-c="teal"] { background: #3fd1b6; } .side .nav-color[data-c="amber"] { background: #fbbf4d; }
+.side .nav-color[data-c="pink"] { background: #f68cc4; } .side .nav-color[data-c="green"] { background: #7bd66a; }
+.side .nav-color[data-c="red"] { background: #ff8a8a; } .side .nav-color[data-c="gray"] { background: #aab2c8; }
 @media (hover: none) { .side .nav-rename { opacity: .5; } }

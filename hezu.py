@@ -130,6 +130,9 @@ def context():
 NAV_SECTIONS = [("accounts", "账号"), ("backend", "后台"), ("backup", "备份"), ("totp", "验证码")]
 NAV_ITEMS = {"accounts": [], "backend": ["cards", "vps", "gpt"], "backup": ["vault", "notes"], "totp": ["dashboard", "logs", "settings"]}
 NAV_LABEL_MAX = 20
+# 每个板块的颜色（左栏的板块名、图标、选中时的底色都用它），可以自己换
+NAV_COLORS = ["purple", "blue", "teal", "amber", "pink", "green", "red", "gray"]
+NAV_DEFAULT_COLORS = {"accounts": "purple", "backend": "blue", "backup": "amber", "totp": "teal"}
 NAV_FIXED = {i for lst in NAV_ITEMS.values() for i in lst}   # 固定页面的小项，名字可以改（存在 names 里）；表的名字就是账本里表的名字
 
 
@@ -202,8 +205,11 @@ def nav_order(sheets=None):
     sections = _ordered(raw.get("sections"), [k for k, _ in NAV_SECTIONS])
     items = raw.get("items") if isinstance(raw.get("items"), dict) else {}
     sheets = _sheet_ids() if sheets is None else sheets
+    collapsed = [k for k in raw.get("collapsed") or [] if k in NAV_ITEMS] if isinstance(raw.get("collapsed"), list) else []
+    rc = raw.get("colors") if isinstance(raw.get("colors"), dict) else {}
+    colors = {k: rc[k] if rc.get(k) in NAV_COLORS else NAV_DEFAULT_COLORS[k] for k in NAV_ITEMS}
     return {"sections": sections, "items": _resolve(sections, items, sheets), "labels": _labels(raw.get("labels")),
-            "names": _names(raw.get("names"))}
+            "names": _names(raw.get("names")), "collapsed": list(dict.fromkeys(collapsed)), "colors": colors}
 
 
 def save_nav_order(data):
@@ -228,6 +234,10 @@ def save_nav_order(data):
         labels = dict(cur["labels"])
         labels.update({k: v for k, v in data["labels"].items() if k in NAV_ITEMS and isinstance(v, str)})
         cur["labels"] = _labels(labels)
+    if isinstance(data.get("colors"), dict):
+        cur["colors"] = dict(cur["colors"], **{k: v for k, v in data["colors"].items() if k in NAV_ITEMS and v in NAV_COLORS})
+    if isinstance(data.get("collapsed"), list):    # 折叠起来的板块（只显示板块名和当前打开的那一项）
+        cur["collapsed"] = list(dict.fromkeys(k for k in data["collapsed"] if k in NAV_ITEMS))
     if isinstance(data.get("names"), dict):        # 留空 = 恢复默认名字
         names = dict(cur["names"])
         names.update({k: v for k, v in data["names"].items() if isinstance(v, str)})
@@ -272,7 +282,8 @@ def shell_nav():
     for sec in order["sections"]:
         its = [by_id[i] if i in by_id else dict(items[i], id=i, default=items[i]["text"], text=order["names"].get(i, items[i]["text"]))
                for i in order["items"][sec]]
-        sections.append({"id": sec, "label": order["labels"][sec], "items": its, "newSheet": sec == "accounts"})
+        sections.append({"id": sec, "label": order["labels"][sec], "items": its, "newSheet": sec == "accounts",
+                         "collapsed": sec in order["collapsed"], "color": order["colors"][sec]})
     return {"sections": sections}
 
 
