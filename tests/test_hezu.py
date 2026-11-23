@@ -282,9 +282,10 @@ def test_add_account_validation_and_duplicates(ctx):
     assert call(ctx.client(), "post", f"{API}/accounts", json={"name": "x", "secret": good}).status_code == 401
 
 
-def test_dashboard_add_button_points_to_unified_entry(ctx):
+def test_dashboard_add_button_stays_on_codes_page(ctx):
+    # 验证码账号页的「添加账号」直接打开添加验证码账号的表单（不再跳到账本的 AI 合租），旁边是批量导入
     html = call(ctx.admin(), "get", "/admin/dashboard").get_data(as_text=True)
-    assert 'href="/admin/hezu?add=1"' in html
+    assert 'href="/admin/accounts/new"' in html and 'id="btnImport"' in html
     # 原来的添加表单还在：账本里给已有的行补建验证码账号时会用到
     assert call(ctx.admin(), "get", "/admin/accounts/new").status_code == 200
 

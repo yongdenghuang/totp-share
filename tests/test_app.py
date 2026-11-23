@@ -557,3 +557,28 @@ def test_changing_admin_password_logs_out_other_devices(ctx):
     assert "其他设备上的登录已全部退出" in r.get_data(as_text=True)
     assert get(laptop, "/admin/dashboard").status_code == 200      # 改密码的这台保持登录
     assert get(phone, "/admin/dashboard").status_code == 302       # 其他设备要重新登录
+
+
+def test_batch_import(ctx):
+    c = ctx.admin()
+
+    def call(c, method, path, **kw):
+        return getattr(c, method)(path, base_url=BASE_URL, **kw)
+    s1, s2 = pyotp.random_base32(), pyotp.random_base32()
+    text = (f"a1@example.com----pw-one----{s1}\n\n"
+            f"a2@example.com\tpw-two\t{s2.lower()}\n"
+            "bad@example.com----pw----NOTBASE32!!\n"
+            f"a1@example.com----again----{s1}\n"
+            "plus-01----x----" + pyotp.random_base32() + "\n")
+    d = call(c, "post", "/admin/accounts/import", json={"text": text, "dry_run": True}).get_json()
+    assert d["ok"] and d["count"] == 2
+    errs = {it["line"]: it["error"] for it in d["items"]}
+    assert errs[1] == "" and errs[3] == "" and "Base32" in errs[4] and "重复" in errs[5] and "同名" in errs[6]
+    assert ctx.sql("SELECT COUNT(*) AS n FROM accounts WHERE name LIKE 'a%@example.com'")[0]["n"] == 0   # 预览不写入
+    d = call(c, "post", "/admin/accounts/import", json={"text": text, "new_group": "导入测试"}).get_json()
+    assert d["ok"] and d["imported"] == 2 and d["group"] == "导入测试"
+    rows = ctx.sql("SELECT name, group_name, password_encrypted FROM accounts WHERE name LIKE 'a%@example.com' ORDER BY name")
+    assert [r["name"] for r in rows] == ["a1@example.com", "a2@example.com"]
+    assert all(r["group_name"] == "导入测试" and r["password_encrypted"] for r in rows)
+    assert call(c, "post", "/admin/accounts/import", json={"text": "", "dry_run": True}).status_code == 400
+    assert call(c, "post", "/admin/accounts/import", json={"text": text, "group": "不存在的分组"}).status_code == 400

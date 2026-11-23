@@ -619,6 +619,85 @@ def account_new():
                            dup_warning=dup_warning, account=form_data,
                            **_form_context())
 
+# ---------- 批量导入 ----------
+IMPORT_MAX_LINES = 500
+
+
+def parse_import_lines(text):
+    """每行「账号----密码----TOTP 密钥」（也认 Tab 或 | 分隔；密钥可以没有）。
+    返回 [{line, name, password, secret, error}]，空行跳过。"""
+    out = []
+    for no, raw in enumerate((text or "").splitlines(), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in re.split(r"-{3,}|\t|\|", line)]
+        parts = [p for p in parts if p != ""] if len(parts) > 3 else parts
+        item = {"line": no, "name": parts[0][:100] if parts else "", "password": parts[1] if len(parts) > 1 else "",
+                "secret": parts[2] if len(parts) > 2 else "", "error": ""}
+        try:
+            if len(parts) > 3:
+                raise ValueError("分隔出来超过 3 段，格式应为 账号----密码----密钥")
+            if not item["name"]:
+                raise ValueError("账号是空的")
+            if not item["secret"]:
+                raise ValueError("缺少 TOTP 密钥")
+            item["secret"] = validate_base32(item["secret"])
+            pyotp.TOTP(item["secret"]).now()
+            if len(item["password"]) > MAX_ACCOUNT_PASSWORD:
+                raise ValueError(f"密码最长 {MAX_ACCOUNT_PASSWORD} 个字符")
+        except ValueError as e:
+            item["error"] = str(e)
+        out.append(item)
+    return out
+
+
+@app.route("/admin/accounts/import", methods=["POST"])
+@login_required
+def accounts_import():
+    """批量导入验证码账号。dry_run=true 只检查不写入（页面先预览，再确认导入）。
+    已有同名账号的、这次粘贴里重复的，都跳过。"""
+    data = request.get_json(silent=True) or {}
+    items = parse_import_lines(str(data.get("text") or ""))
+    if not items:
+        return jsonify(ok=False, error="没有可导入的内容：每行一个账号，格式 账号----密码----密钥"), 400
+    if len(items) > IMPORT_MAX_LINES:
+        return jsonify(ok=False, error=f"一次最多导入 {IMPORT_MAX_LINES} 个"), 400
+    existing = {norm_name(r["name"]) for r in query_all("SELECT name FROM accounts")}
+    seen = set()
+    for it in items:
+        key = norm_name(it["name"])
+        if not it["error"] and key in existing:
+            it["error"] = "已有同名账号，跳过"
+        elif not it["error"] and key in seen:
+            it["error"] = "这次粘贴里重复了，跳过"
+        seen.add(key)
+    ok_items = [it for it in items if not it["error"]]
+    result = [{"line": it["line"], "name": it["name"], "hasPassword": bool(it["password"]), "error": it["error"]} for it in items]
+    if data.get("dry_run"):
+        return jsonify(ok=True, items=result, count=len(ok_items))
+    try:
+        if data.get("new_group"):
+            group = create_group(str(data.get("new_group")))
+        else:
+            group = resolve_group(str(data.get("group") or ""))
+    except ValueError as e:
+        return jsonify(ok=False, error=str(e)), 400
+    db = get_db()
+    try:
+        for it in ok_items:
+            token = new_token()
+            db.execute("""INSERT INTO accounts(name, secret_encrypted, url_token, url_token_hash, group_name, password_encrypted)
+                          VALUES (?,?,?,?,?,?)""",
+                       (it["name"], encrypt_secret(it["secret"]), token, hash_token(token), group,
+                        encrypt_secret(it["password"]) if it["password"] else None))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return jsonify(ok=True, items=result, imported=len(ok_items), group=group or "")
+
+
 @app.route("/admin/accounts/<int:aid>/edit", methods=["GET", "POST"])
 @login_required
 def account_edit(aid):

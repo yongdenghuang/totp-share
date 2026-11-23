@@ -5,7 +5,8 @@
  <h4 class="mb-0">验证码账号</h4>
  <div class="d-flex gap-2">
    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnResetSort" title="取消当前排序，恢复拖拽保存的顺序">↺ 恢复默认顺序</button>
-   <a class="btn btn-primary btn-sm" href="{{ url_for('hezu_page') }}?add=1" title="统一入口：一次建好验证码账号和账本记录">+ 添加账号</a>
+   <button type="button" class="btn btn-outline-primary btn-sm" id="btnImport" title="粘贴多行 账号----密码----密钥，一次导入">⇪ 批量导入</button>
+   <a class="btn btn-primary btn-sm" href="{{ url_for('account_new') }}">+ 添加账号</a>
  </div>
 </div>
 
@@ -105,6 +106,46 @@
   {% endfor %}
   </tbody></table></div>
   <div class="text-center text-muted py-4 d-none" id="noMatch">没有符合条件的账号。</div>
+</div>
+
+{# ===== 批量导入：每行 账号----密码----密钥，选好分组，先预览再导入 ===== #}
+<div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importTitle" aria-hidden="true">
+ <div class="modal-dialog modal-lg"><div class="modal-content">
+  <div class="modal-header">
+   <h5 class="modal-title" id="importTitle">批量导入账号</h5>
+   <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+  </div>
+  <div class="modal-body">
+   <label class="form-label small text-muted" for="importText">每行一个账号，格式：<code>账号----密码----TOTP 密钥</code>（也可以用 Tab 或 | 隔开）</label>
+   <textarea class="form-control font-monospace" id="importText" rows="8" spellcheck="false" autocomplete="off"
+     placeholder="name@example.com----password----ABCDEFGHIJKLMNOPQRSTUVWX"></textarea>
+   <div class="row g-2 mt-2 align-items-end">
+    <div class="col-sm-6">
+     <label class="form-label small text-muted" for="importGroup">放进哪个分组</label>
+     <select class="form-select" id="importGroup">
+      <option value="">未分组</option>
+      {% for g in groups %}<option value="{{ g.name }}">{{ g.name }}</option>{% endfor %}
+      <option value="__new__">＋ 新建分组…</option>
+     </select>
+    </div>
+    <div class="col-sm-6 d-none" id="importNewGroupWrap">
+     <label class="form-label small text-muted" for="importNewGroup">新分组名称</label>
+     <input class="form-control" id="importNewGroup" maxlength="30" autocomplete="off">
+    </div>
+   </div>
+   <div class="small mt-3" id="importStatus"></div>
+   <div class="table-responsive mt-2 d-none" id="importPreviewWrap" style="max-height: 260px;">
+    <table class="table table-sm align-middle mb-0">
+     <thead><tr><th style="width:3.5rem">行</th><th>账号</th><th style="width:5rem">密码</th><th>结果</th></tr></thead>
+     <tbody id="importPreview"></tbody>
+    </table>
+   </div>
+  </div>
+  <div class="modal-footer">
+   <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+   <button type="button" class="btn btn-primary" id="importGo" disabled>导入</button>
+  </div>
+ </div></div>
 </div>
 
 {# ===== 改密码弹窗：生成新密码 → 保存 → 复制去官网改 → 复制信息发给对方 ===== #}
@@ -988,6 +1029,67 @@
     tbody.addEventListener('click', function(e){
       var btn = e.target.closest('.js-change-pw');
       if (btn) open(btn.closest('tr'));
+    });
+  })();
+  // ===== 批量导入 =====
+  (function(){
+    var modalEl = document.getElementById('importModal');
+    if (!modalEl || !window.bootstrap) return;
+    var modal = new bootstrap.Modal(modalEl);
+    var $ = function(id){ return document.getElementById(id); };
+    var text = $('importText'), group = $('importGroup'), newGroup = $('importNewGroup'), newWrap = $('importNewGroupWrap');
+    var status = $('importStatus'), wrap = $('importPreviewWrap'), tbody = $('importPreview'), go = $('importGo');
+    var timer = null, okCount = 0, seq = 0;
+    function note(t, kind){ status.textContent = t || ''; status.className = 'small mt-3 ' + (kind === 'error' ? 'text-danger' : kind === 'ok' ? 'text-success' : 'text-muted'); }
+    function esc(s){ var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+    function show(items){
+      tbody.innerHTML = items.map(function(it){
+        return '<tr><td class="text-muted">' + it.line + '</td><td class="text-break">' + esc(it.name) + '</td><td>' + (it.hasPassword ? '有' : '<span class="text-muted">无</span>') +
+          '</td><td>' + (it.error ? '<span class="text-danger">' + esc(it.error) + '</span>' : '<span class="text-success">✓ 可以导入</span>') + '</td></tr>';
+      }).join('');
+      wrap.classList.toggle('d-none', !items.length);
+    }
+    // 粘贴或修改后自动检查一遍（不写入）
+    function preview(){
+      var my = ++seq;
+      if (!text.value.trim()) { okCount = 0; go.disabled = true; show([]); note(''); return; }
+      note('正在检查…');
+      postJSON('/admin/accounts/import', { text: text.value, dry_run: true }).then(function(resp){
+        if (my !== seq) return;
+        var d = resp.data || {};
+        if (!d.ok) { okCount = 0; go.disabled = true; show([]); note(d.error || '检查失败', 'error'); return; }
+        okCount = d.count; show(d.items);
+        var bad = d.items.length - d.count;
+        go.disabled = !okCount;
+        go.textContent = okCount ? '导入 ' + okCount + ' 个' : '导入';
+        note('共 ' + d.items.length + ' 行：' + okCount + ' 个可以导入' + (bad ? '，' + bad + ' 个会跳过（见下表）' : ''), bad && !okCount ? 'error' : '');
+      }).catch(function(e){ if (my === seq) note('检查失败：' + e.message, 'error'); });
+    }
+    text.addEventListener('input', function(){ clearTimeout(timer); timer = setTimeout(preview, 300); });
+    group.addEventListener('change', function(){
+      newWrap.classList.toggle('d-none', group.value !== '__new__');
+      if (group.value === '__new__') newGroup.focus();
+    });
+    go.addEventListener('click', function(){
+      var body = { text: text.value };
+      if (group.value === '__new__') {
+        if (!newGroup.value.trim()) { note('请填写新分组的名称', 'error'); newGroup.focus(); return; }
+        body.new_group = newGroup.value.trim();
+      } else body.group = group.value;
+      go.disabled = true; note('正在导入…');
+      postJSON('/admin/accounts/import', body).then(function(resp){
+        var d = resp.data || {};
+        if (!d.ok) { go.disabled = false; note(d.error || '导入失败', 'error'); return; }
+        show(d.items);
+        note('✓ 已导入 ' + d.imported + ' 个' + (d.group ? '到「' + d.group + '」' : '（未分组）') + '，正在刷新列表…', 'ok');
+        setTimeout(function(){ location.reload(); }, 900);
+      }).catch(function(e){ go.disabled = false; note('导入失败：' + e.message, 'error'); });
+    });
+    document.getElementById('btnImport').addEventListener('click', function(){
+      text.value = ''; newGroup.value = ''; group.value = ''; newWrap.classList.add('d-none');
+      show([]); note(''); go.disabled = true; go.textContent = '导入';
+      modal.show();
+      setTimeout(function(){ text.focus(); }, 300);
     });
   })();
 })();
