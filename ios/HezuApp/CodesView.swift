@@ -4,6 +4,7 @@ struct TotpAccount: Identifiable, Hashable {
     let id: Int
     var name: String
     var group: String
+    var subgroup: String = ""      // 子分组（分组下面再分区），没有是空
     var hasPassword: Bool
     var shareUrl: String
     var lastSeen: String
@@ -32,7 +33,7 @@ final class CodesStore: ObservableObject {
         do {
             let d = try await api.get("/api/app/accounts")
             accounts = d.list("accounts").map {
-                TotpAccount(id: $0.int("id"), name: $0.str("name"), group: $0.str("group"), hasPassword: $0.bool("hasPassword"),
+                TotpAccount(id: $0.int("id"), name: $0.str("name"), group: $0.str("group"), subgroup: $0.str("subgroup"), hasPassword: $0.bool("hasPassword"),
                             shareUrl: $0.str("shareUrl"), lastSeen: $0.str("lastSeen"), duplicate: $0.bool("duplicate"))
             }
             groups = d.list("groups").map { TotpGroup(name: $0.str("name"), color: $0.str("color")) }
@@ -89,6 +90,12 @@ final class CodesStore: ObservableObject {
         let d = try await api.post("/admin/accounts/\(a.id)/field", ["field": "group_name", "value": group])
         update(a.id) { $0.group = d.str("raw_value") }
     }
+    func setSubgroup(_ a: TotpAccount, _ sub: String) async throws {
+        let d = try await api.post("/admin/accounts/\(a.id)/field", ["field": "subgroup", "value": sub])
+        update(a.id) { $0.subgroup = d.str("raw_value") }
+    }
+    /// 已经用过的子分组（改的时候可以直接点）
+    var subgroups: [String] { Array(Set(accounts.map(\.subgroup).filter { !$0.isEmpty })).sorted { $0.localizedStandardCompare($1) == .orderedAscending } }
     func regen(_ a: TotpAccount) async throws -> String {
         let url = try await api.post("/admin/accounts/\(a.id)/regen").str("url")
         update(a.id) { $0.shareUrl = url }
@@ -115,6 +122,7 @@ struct CodesView: View {
     @EnvironmentObject var toast: Toast
     @State private var query = ""
     @State private var groupFilter = ""
+    @State private var subFilter: String?          // nil = 全部子分组，"" = 没填的
     @State private var adding = false
     @State private var editing: EditAction?
     @State private var confirmDelete: TotpAccount?
@@ -125,7 +133,10 @@ struct CodesView: View {
             let left = max(0, Int(ceil(store.expiresAt.timeIntervalSince(ctx.date))))
             List {
                 if !store.groups.isEmpty {
-                    Section { groupChips }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                    Section {
+                        groupChips
+                        if !subsInFilter.isEmpty { subChips }
+                    }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
                 ForEach(filteredSections, id: \.title) { sec in
                     Section {
@@ -151,7 +162,7 @@ struct CodesView: View {
             }
         }
         .navigationTitle("验证码")
-        .searchable(text: $query, prompt: "搜索账号或分组")
+        .searchable(text: $query, prompt: "搜索账号、分组或子分组")
         .refreshable { await store.load() }
         .toolbar { ToolbarItem(placement: .primaryAction) { Button { adding = true } label: { Image(systemName: "plus") } } }
         .task { store.api = api; if !store.loaded { await store.load() } else { await store.refreshCodes() } }
@@ -169,11 +180,43 @@ struct CodesView: View {
     private var groupChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                chip("全部", nil, groupFilter.isEmpty) { groupFilter = "" }
-                ForEach(store.groups) { g in chip(g.name, Color(hex: g.color), groupFilter == g.name) { groupFilter = groupFilter == g.name ? "" : g.name } }
+                chip("全部", nil, groupFilter.isEmpty) { groupFilter = ""; subFilter = nil }
+                ForEach(store.groups) { g in chip(g.name, Color(hex: g.color), groupFilter == g.name) { groupFilter = groupFilter == g.name ? "" : g.name; subFilter = nil } }
             }
             .padding(.horizontal, 16).padding(.vertical, 4)
         }
+    }
+
+    /// 选中的分组里有哪些子分组（数量）
+    private var subsInFilter: [(name: String, count: Int)] {
+        guard !groupFilter.isEmpty else { return [] }
+        let items = store.accounts.filter { $0.group == groupFilter }
+        let names = Array(Set(items.map(\.subgroup).filter { !$0.isEmpty })).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        guard !names.isEmpty else { return [] }
+        var out = names.map { n in (name: n, count: items.filter { $0.subgroup == n }.count) }
+        let none = items.filter { $0.subgroup.isEmpty }.count
+        if none > 0 { out.append((name: "", count: none)) }
+        return out
+    }
+    private var subChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Text("子分组").font(.caption).foregroundStyle(.secondary)
+                subChip("全部", subFilter == nil) { subFilter = nil }
+                ForEach(subsInFilter, id: \.name) { s in
+                    subChip((s.name.isEmpty ? "没填" : s.name) + " \(s.count)", subFilter == s.name) { subFilter = subFilter == s.name ? nil : s.name }
+                }
+            }
+            .padding(.horizontal, 16).padding(.bottom, 4)
+        }
+    }
+    private func subChip(_ t: String, _ on: Bool, _ tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            Text(t).font(.caption.weight(on ? .semibold : .regular))
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(on ? Color.secondary.opacity(0.35) : Color(.secondarySystemGroupedBackground), in: Capsule())
+                .foregroundStyle(.primary)
+        }.buttonStyle(.plain)
     }
 
     private func chip(_ t: String, _ c: Color?, _ on: Bool, _ tap: @escaping () -> Void) -> some View {
@@ -193,7 +236,10 @@ struct CodesView: View {
         return store.sections.compactMap { s in
             let name = s.group?.name ?? "未分组"
             if !groupFilter.isEmpty && name != groupFilter { return nil }
-            let items = s.items.filter { q.isEmpty || $0.name.lowercased().contains(q) || name.lowercased().contains(q) }
+            let items = s.items.filter {
+                (subFilter == nil || groupFilter.isEmpty || $0.subgroup == subFilter) &&
+                (q.isEmpty || $0.name.lowercased().contains(q) || name.lowercased().contains(q) || $0.subgroup.lowercased().contains(q))
+            }
             return items.isEmpty ? nil : (name, s.group.map { Color(hex: $0.color) } ?? .gray, items)
         }
     }
@@ -207,6 +253,7 @@ struct CodesView: View {
                 Button { toast.copy(a.name, "已复制账号 \(a.name)") } label: {
                     HStack(spacing: 6) {
                         Text(a.name).font(.body.weight(.medium)).lineLimit(1).foregroundStyle(.primary)
+                        if !a.subgroup.isEmpty { Tag(text: a.subgroup, color: .secondary) }
                         if a.duplicate { Tag(text: "重名", color: .warn) }
                     }
                 }
@@ -249,6 +296,7 @@ struct CodesView: View {
         Divider()
         Button { editing = .password(a) } label: { Label(a.hasPassword ? "改密码" : "设置密码", systemImage: "key.viewfinder") }
         Button { editing = .rename(a) } label: { Label("重命名", systemImage: "pencil") }
+        Button { editing = .subgroup(a) } label: { Label(a.subgroup.isEmpty ? "设置子分组…" : "子分组：\(a.subgroup)…", systemImage: "square.stack.3d.up") }
         Menu {
             Button("未分组") { move(a, "") }
             ForEach(store.groups) { g in Button(g.name) { move(a, g.name) } }
@@ -304,8 +352,10 @@ struct CountdownRing: View {
 
 // MARK: - 改密码 / 重命名
 enum EditAction: Identifiable {
-    case password(TotpAccount), rename(TotpAccount)
-    var id: String { switch self { case .password(let a): return "p\(a.id)"; case .rename(let a): return "r\(a.id)" } }
+    case password(TotpAccount), rename(TotpAccount), subgroup(TotpAccount)
+    var id: String {
+        switch self { case .password(let a): return "p\(a.id)"; case .rename(let a): return "r\(a.id)"; case .subgroup(let a): return "s\(a.id)" }
+    }
 }
 
 struct EditTextSheet: View {
@@ -336,25 +386,40 @@ struct EditTextSheet: View {
                     }
                 case .rename(let a):
                     Section { TextField("账号名称", text: $text).textInputAutocapitalization(.never).autocorrectionDisabled() } header: { Text(a.name) }
+                case .subgroup(let a):
+                    Section {
+                        TextField("子分组，例如：A 区", text: $text).autocorrectionDisabled()
+                    } header: { Text(a.name) } footer: { Text("分组下面再分区，随便填；留空 = 不放子分组。和网页同步。") }
+                    if !store.subgroups.isEmpty {
+                        Section("已经用过的") {
+                            ForEach(store.subgroups, id: \.self) { s in
+                                Button { text = s } label: { HStack { Text(s).foregroundStyle(.primary); Spacer(); if text == s { Image(systemName: "checkmark") } } }
+                            }
+                        }
+                    }
                 }
                 if let error { Text(error).foregroundStyle(Color.bad) }
             }
             .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("保存", action: save).disabled(busy || text.trimmingCharacters(in: .whitespaces).isEmpty) }
+                ToolbarItem(placement: .confirmationAction) { Button("保存", action: save).disabled(busy || (!allowsEmpty && text.trimmingCharacters(in: .whitespaces).isEmpty)) }
             }
             .task {
                 switch action {
                 case .password(let a): if a.hasPassword { previous = (try? await store.password(a)) ?? "" }
                 case .rename(let a): text = a.name
+                case .subgroup(let a): text = a.subgroup
                 }
             }
         }
         .presentationDetents([.medium, .large])
     }
 
-    private var title: String { if case .password = action { return "账号密码" }; return "重命名" }
+    private var title: String {
+        switch action { case .password: return "账号密码"; case .rename: return "重命名"; case .subgroup: return "子分组" }
+    }
+    private var allowsEmpty: Bool { if case .subgroup = action { return true }; return false }
 
     private func save() {
         busy = true
@@ -363,6 +428,7 @@ struct EditTextSheet: View {
                 switch action {
                 case .password(let a): try await store.setPassword(a, text.trimmingCharacters(in: .whitespaces))
                 case .rename(let a): try await store.rename(a, text.trimmingCharacters(in: .whitespaces))
+                case .subgroup(let a): try await store.setSubgroup(a, text.trimmingCharacters(in: .whitespaces))
                 }
                 toast.show("已保存"); dismiss()
             } catch { self.error = error.localizedDescription }

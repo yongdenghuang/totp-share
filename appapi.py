@@ -54,7 +54,7 @@ def install(core):
     def app_accounts():
         """验证码账号列表（不含密钥和密码）+ 分组（顺序、颜色）。验证码本身用 /admin/codes 取。"""
         rows = core.query_all(
-            """SELECT id, name, url_token, created_at, group_name,
+            """SELECT id, name, url_token, created_at, group_name, subgroup,
                       password_encrypted IS NOT NULL AS has_password
                FROM accounts ORDER BY COALESCE(sort_order, 999999), created_at DESC""")
         last_seen = {r["account_id"]: r["seen"] for r in core.query_all(
@@ -62,7 +62,7 @@ def install(core):
                WHERE event='view' GROUP BY account_id""")}
         dup = Counter(core.norm_name(r["name"]) for r in rows)
         accounts = [{
-            "id": r["id"], "name": r["name"], "group": r["group_name"] or "",
+            "id": r["id"], "name": r["name"], "group": r["group_name"] or "", "subgroup": r["subgroup"] or "",
             "hasPassword": bool(r["has_password"]),
             "shareUrl": base_url() + "/t/" + r["url_token"],
             "lastSeen": core.cn_time(last_seen[r["id"]], "%m-%d %H:%M") if last_seen.get(r["id"]) else "",
