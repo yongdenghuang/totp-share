@@ -33,6 +33,13 @@
     </div>
 
     <div class="mb-3">
+      <label class="form-label" for="subgroup">子分组</label>
+      <input class="form-control" id="subgroup" name="subgroup" maxlength="40" list="subgroupList" autocomplete="off"
+             value="{{ account.subgroup or '' }}" placeholder="可选，分组下面再分区，例如：A 区">
+      <datalist id="subgroupList">{% for s in subgroup_options %}<option value="{{ s }}">{% endfor %}</datalist>
+    </div>
+
+    <div class="mb-3">
       <label class="form-label" for="account_password">账号密码</label>
       <div class="input-group">
         <input class="form-control font-monospace" id="account_password" name="account_password"

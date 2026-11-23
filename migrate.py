@@ -18,6 +18,7 @@ ACCOUNT_COLUMNS = [
     ("share_password_hash", "TEXT"),   # 此链接的单独密码；NULL = 跟随统一设置
     ("password_encrypted", "BLOB"),    # 账号本身的登录密码（Fernet 加密）；NULL = 没存
     ("password_prev_encrypted", "BLOB"),  # 上一个密码：改密码时留一份，官网没改成功还能找回
+    ("subgroup", "TEXT"),              # 子分组（分组下面再分区，随便填）；NULL = 没有
 ]
 
 # 分组标签的默认配色：新建分组时按顺序取第一个还没被用过的颜色。

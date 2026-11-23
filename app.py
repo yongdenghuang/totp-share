@@ -431,7 +431,7 @@ def logout():
 @app.route("/admin/dashboard")
 @login_required
 def dashboard():
-    rows = query_all("""SELECT id, name, url_token, created_at, group_name,
+    rows = query_all("""SELECT id, name, url_token, created_at, group_name, subgroup,
                                password_encrypted IS NOT NULL AS has_password,
                                share_password_hash IS NOT NULL AS has_own_password
                         FROM accounts ORDER BY COALESCE(sort_order, 999999), created_at DESC""")
@@ -444,6 +444,7 @@ def dashboard():
         "id": r["id"], "name": r["name"], "url_token": r["url_token"],
         "created_at": r["created_at"],
         "group_name": r["group_name"] or "",
+        "subgroup": r["subgroup"] or "",
         "has_own_password": bool(r["has_own_password"]),
         "has_password": bool(r["has_password"]),
         "is_duplicate": name_counts[norm_name(r["name"])] > 1,
@@ -566,8 +567,10 @@ def parse_link_password(raw):
 def _form_context(exclude_id=None):
     """账号表单需要的辅助数据：已有分组（下拉提示）、已有名称（输入时即时提示重名）。"""
     rows = query_all("SELECT id, name FROM accounts ORDER BY id")
+    subs = [r["subgroup"] for r in query_all("SELECT DISTINCT subgroup FROM accounts WHERE subgroup IS NOT NULL AND subgroup<>'' ORDER BY subgroup")]
     return {
         "group_options": list_groups(),
+        "subgroup_options": subs,
         "new_group_option": NEW_GROUP_OPTION,
         "existing_names": [r["name"] for r in rows if r["id"] != exclude_id],
         "share_pw_enabled": get_setting("share_password_enabled") == "1",
@@ -580,7 +583,7 @@ def account_new():
     dup_warning = None
     # 从合租账本点「新建验证码账号」过来时，名称已经带在地址里
     form_data = {"name": request.args.get("name", "").strip()[:100],
-                 "secret": "", "group_name": "", "new_group": "",
+                 "secret": "", "group_name": "", "new_group": "", "subgroup": "",
                  "link_password": "", "account_password": ""}
     if request.method == "POST":
         form_data["name"] = request.form.get("name", "").strip()[:100]
@@ -589,6 +592,7 @@ def account_new():
         form_data["new_group"] = request.form.get("new_group", "").strip()
         form_data["link_password"] = request.form.get("link_password", "")
         form_data["account_password"] = request.form.get("account_password", "").strip()
+        form_data["subgroup"] = request.form.get("subgroup", "")
         if not form_data["name"]:
             error = "请填写账号名称"
         else:
@@ -607,10 +611,11 @@ def account_new():
                     token = new_token()
                     execute("""INSERT INTO accounts(
                                  name, secret_encrypted, url_token, url_token_hash,
-                                 group_name, share_password_hash, password_encrypted)
-                               VALUES (?,?,?,?, ?,?,?)""",
+                                 group_name, subgroup, share_password_hash, password_encrypted)
+                               VALUES (?,?,?,?, ?,?,?,?)""",
                             (form_data["name"], encrypt_secret(secret_norm),
-                             token, hash_token(token), group, link_pw_hash, account_pw))
+                             token, hash_token(token), group, parse_subgroup(form_data["subgroup"]),
+                             link_pw_hash, account_pw))
                     flash("账号已添加。分享链接：" + request.host_url + "t/" + token, "success")
                     return redirect(url_for("dashboard"))
             except ValueError as e:
@@ -618,6 +623,16 @@ def account_new():
     return render_template("account_form.html", mode="new", error=error,
                            dup_warning=dup_warning, account=form_data,
                            **_form_context())
+
+# ---------- 子分组 ----------
+SUBGROUP_MAX = 40
+
+
+def parse_subgroup(raw):
+    """子分组：分组下面再分区（比如「A 区」「已售」），随便填；留空 = 没有（返回 None）。"""
+    s = " ".join(str(raw or "").split())[:SUBGROUP_MAX]
+    return s or None
+
 
 # ---------- 批量导入 ----------
 IMPORT_MAX_LINES = 500
@@ -683,19 +698,20 @@ def accounts_import():
             group = resolve_group(str(data.get("group") or ""))
     except ValueError as e:
         return jsonify(ok=False, error=str(e)), 400
+    sub = parse_subgroup(data.get("subgroup"))
     db = get_db()
     try:
         for it in ok_items:
             token = new_token()
-            db.execute("""INSERT INTO accounts(name, secret_encrypted, url_token, url_token_hash, group_name, password_encrypted)
-                          VALUES (?,?,?,?,?,?)""",
-                       (it["name"], encrypt_secret(it["secret"]), token, hash_token(token), group,
+            db.execute("""INSERT INTO accounts(name, secret_encrypted, url_token, url_token_hash, group_name, subgroup, password_encrypted)
+                          VALUES (?,?,?,?,?,?,?)""",
+                       (it["name"], encrypt_secret(it["secret"]), token, hash_token(token), group, sub,
                         encrypt_secret(it["password"]) if it["password"] else None))
         db.commit()
     except Exception:
         db.rollback()
         raise
-    return jsonify(ok=True, items=result, imported=len(ok_items), group=group or "")
+    return jsonify(ok=True, items=result, imported=len(ok_items), group=group or "", subgroup=sub or "")
 
 
 @app.route("/admin/accounts/<int:aid>/edit", methods=["GET", "POST"])
@@ -706,7 +722,7 @@ def account_edit(aid):
     error = None
     dup_warning = None
     account = {"name": row["name"], "secret": "", "group_name": row["group_name"] or "",
-               "new_group": "",
+               "new_group": "", "subgroup": row["subgroup"] or "",
                # 编辑页直接带出已保存的账号密码：清空再保存 = 删除
                "account_password": decrypt_account_password(row["password_encrypted"]),
                "link_password": "", "has_own_password": bool(row["share_password_hash"])}
@@ -717,6 +733,7 @@ def account_edit(aid):
         account["new_group"] = request.form.get("new_group", "").strip()
         account["link_password"] = request.form.get("link_password", "")
         account["account_password"] = request.form.get("account_password", "").strip()
+        account["subgroup"] = request.form.get("subgroup", "")
         regen = request.form.get("regen_url") == "1"
         clear_pw = request.form.get("clear_link_password") == "1"
         account["regen_url"] = regen
@@ -746,6 +763,8 @@ def account_edit(aid):
                 else:
                     sql_parts.append("group_name=?")
                     args.append(group_from_form(request.form))
+                    sql_parts.append("subgroup=?")
+                    args.append(parse_subgroup(account["subgroup"]))
                     if regen:
                         t = new_token()
                         sql_parts.append("url_token=?"); args.append(t)
@@ -854,15 +873,19 @@ def accounts_reorder():
 @app.route("/admin/accounts/<int:aid>/field", methods=["POST"])
 @login_required
 def account_field_update(aid):
-    """列表页内联编辑。接收 JSON: {"field": "group_name" | "name", "value": "..."}
+    """列表页内联编辑。接收 JSON: {"field": "group_name" | "subgroup" | "name", "value": "..."}
     开放分组和账号名（合租账本里改账号名时同步过来）；返回 {"ok": True, "display": "...", "raw_value": "..."}
     """
     data = request.get_json(silent=True) or {}
-    if data.get("field") not in ("group_name", "name"):
+    if data.get("field") not in ("group_name", "subgroup", "name"):
         return jsonify(ok=False, error="不允许的字段"), 400
     if not query_one("SELECT 1 FROM accounts WHERE id=?", (aid,)):
         return jsonify(ok=False, error="账号不存在"), 404
     raw = data.get("value")
+    if data["field"] == "subgroup":
+        sub = parse_subgroup(raw)
+        execute("UPDATE accounts SET subgroup=? WHERE id=?", (sub, aid))
+        return jsonify(ok=True, display=sub or "-", raw_value=sub or "")
     if data["field"] == "name":
         name = str(raw or "").strip()[:100]
         if not name:

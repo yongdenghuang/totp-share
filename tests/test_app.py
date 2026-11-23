@@ -582,3 +582,23 @@ def test_batch_import(ctx):
     assert all(r["group_name"] == "导入测试" and r["password_encrypted"] for r in rows)
     assert call(c, "post", "/admin/accounts/import", json={"text": "", "dry_run": True}).status_code == 400
     assert call(c, "post", "/admin/accounts/import", json={"text": text, "group": "不存在的分组"}).status_code == 400
+
+
+def test_subgroup(ctx):
+    import pyotp
+    c = ctx.admin()
+
+    def call(c, method, path, **kw):
+        return getattr(c, method)(path, base_url=BASE_URL, **kw)
+    aid = ctx.sql("SELECT id FROM accounts ORDER BY id LIMIT 1")[0]["id"]
+    d = call(c, "post", f"/admin/accounts/{aid}/field", json={"field": "subgroup", "value": "  A   区 "}).get_json()
+    assert d["ok"] and d["raw_value"] == "A 区"
+    html = call(c, "get", "/admin/dashboard").get_data(as_text=True)
+    assert 'data-sub="A 区"' in html and 'data-field="subgroup"' in html
+    assert call(c, "post", f"/admin/accounts/{aid}/field", json={"field": "subgroup", "value": ""}).get_json()["raw_value"] == ""
+    assert ctx.sql("SELECT subgroup FROM accounts WHERE id=?", (aid,))[0]["subgroup"] is None
+    # 批量导入时一起填
+    text = f"s1@example.com----pw----{pyotp.random_base32()}"
+    d = call(c, "post", "/admin/accounts/import", json={"text": text, "subgroup": "B 区"}).get_json()
+    assert d["ok"] and d["subgroup"] == "B 区"
+    assert ctx.sql("SELECT subgroup FROM accounts WHERE name='s1@example.com'")[0]["subgroup"] == "B 区"
