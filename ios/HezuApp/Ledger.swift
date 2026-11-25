@@ -209,6 +209,12 @@ extension Dictionary where Key == String, Value == Any {
         let list = (self["totpSkip"] as? [Any])?.compactMap { ($0 as? Int) ?? ($0 as? NSNumber)?.intValue } ?? []
         self["totpSkip"] = list.filter { $0 != id }
     }
+    mutating func setHiddenGroups(id: String, hidden: [String]) {
+        editList("sheets") { l in
+            guard let i = l.firstIndex(where: { $0.str("id") == id }) else { return }
+            if hidden.isEmpty { l[i]["hideGroups"] = nil } else { l[i]["hideGroups"] = hidden }
+        }
+    }
     /// 分组表的「分组和账号验证码同步」（默认开；关掉存成 syncGroups = false）
     mutating func setSheetSync(id: String, on: Bool) {
         editList("sheets") { l in
@@ -306,6 +312,11 @@ extension LedgerStore {
         let own = Set(sheets.filter { $0.str("mode") == "accounts" }.map { $0.str("totpGroup") }.filter { !$0.isEmpty })
         return groups.filter { !own.contains($0.name) }
     }
+    /// 分组表自己隐藏的分组（sheet.hideGroups）：只是这张表不显示，验证码那边不动
+    func hiddenGroupIDs(_ sheet: JSON) -> Set<String> { Set((sheet["hideGroups"] as? [Any] ?? []).compactMap { $0 as? String }) }
+    func visibleGroups(in sheet: JSON) -> [LGroup] { let h = hiddenGroupIDs(sheet); return visibleGroups.filter { !h.contains($0.id) } }
+    /// 算「未分组」用：没在这张表隐藏的分组
+    func shownGroupIDs(in sheet: JSON) -> Set<String> { let h = hiddenGroupIDs(sheet); return Set(groups.map(\.id).filter { !h.contains($0) }) }
     var sheetInfo: [SheetInfo] {
         sheets.map { SheetInfo(id: $0.str("id"), name: $0.str("name"), mode: $0.str("mode"), grouped: $0.bool("grouped"), rows: rows(latestMonth, $0.str("id")).count) }
     }

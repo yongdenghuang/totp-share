@@ -70,7 +70,7 @@ struct RowEditor: View {
                     if sheet.bool("grouped") {
                         Picker("分组", selection: $group) {
                             Text("未分组").tag("")
-                            ForEach(ledger.visibleGroups) { g in Text(g.name).tag(g.id) }
+                            ForEach(ledger.visibleGroups(in: sheet)) { g in Text(g.name).tag(g.id) }
                         }
                     }
                     if let a = linked {

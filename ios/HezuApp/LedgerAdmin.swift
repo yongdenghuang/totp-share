@@ -74,6 +74,7 @@ struct SheetForm: View {
     @State private var mode = "unit"
     @State private var confirmDelete = false
     @State private var syncGroups = true
+    @State private var hidden: Set<String> = []
     var onDeleted: (() -> Void)?
     private var grouped: Bool { ledger.sheet(sheetID)?.bool("grouped") ?? false }
 
@@ -96,6 +97,17 @@ struct SheetForm: View {
                              : "这张表的分组自己管：比如用 Google 账号注册的 Claude 放在 Claude 分组，同时关联 Google 的验证码。验证码里新加的账号也不会自动加进来。")
                     }
                 }
+                if grouped {
+                    Section {
+                        ForEach(ledger.visibleGroups) { g in
+                            Toggle(isOn: Binding(get: { !hidden.contains(g.id) }, set: { on in if on { hidden.remove(g.id) } else { hidden.insert(g.id) } })) {
+                                HStack(spacing: 8) { Circle().fill(Color(hex: g.color)).frame(width: 8, height: 8); Text(g.name) }
+                            }
+                        }
+                    } header: { Text("这张表显示哪些分组") } footer: {
+                        Text("关掉只是这张表里不显示：账号验证码里的分组和账号都不会动，也不会删。这个分组里已经记在这张表的账号会放到「未分组」。")
+                    }
+                }
                 if !sheetID.isEmpty && !grouped {
                     Section { Button("删除这张表", role: .destructive) { confirmDelete = true } } footer: { Text("它在所有月份里的账号都会一起删除，不能恢复。") }
                 }
@@ -106,8 +118,8 @@ struct SheetForm: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(sheetID.isEmpty ? "新建" : "保存") {
                         let n = name.trimmingCharacters(in: .whitespaces), m = mode, id = sheetID.isEmpty ? "s_" + uid() : sheetID
-                        let g = grouped, on = syncGroups
-                        if sheetID.isEmpty { ledger.edit { $0.addSheet(id: id, name: n, mode: m) } } else { ledger.edit { $0.updateSheet(id: id, name: n, mode: m); if g { $0.setSheetSync(id: id, on: on) } } }
+                        let g = grouped, on = syncGroups, hide = ledger.visibleGroups.map(\.id).filter { hidden.contains($0) }
+                        if sheetID.isEmpty { ledger.edit { $0.addSheet(id: id, name: n, mode: m) } } else { ledger.edit { $0.updateSheet(id: id, name: n, mode: m); if g { $0.setSheetSync(id: id, on: on); $0.setHiddenGroups(id: id, hidden: hide) } } }
                         toast.show("已保存"); dismiss()
                     }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
@@ -116,7 +128,7 @@ struct SheetForm: View {
                 Button("取消", role: .cancel) {}
                 Button("删除", role: .destructive) { let id = sheetID; ledger.edit { $0.deleteSheet(id: id) }; toast.show("已删除"); dismiss(); onDeleted?() }
             } message: { Text("这张表在所有月份里的账号都会一起删除，不能恢复。") }
-            .onAppear { if let s = ledger.sheet(sheetID) { name = s.str("name"); mode = s.str("mode"); syncGroups = (s["syncGroups"] as? Bool) != false } }
+            .onAppear { if let s = ledger.sheet(sheetID) { name = s.str("name"); mode = s.str("mode"); syncGroups = (s["syncGroups"] as? Bool) != false; hidden = ledger.hiddenGroupIDs(s) } }
         }
     }
 }

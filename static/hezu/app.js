@@ -248,7 +248,7 @@
     for (const a of A) if (!have.has(a.id) && !skip.has(a.id)) {
       const own = sheetForGroup(a.group);   // 这个分组归「只存账号」表的，加到那张表里
       if (own) M.rows[own.id].push(fixRow({ account: a.name, totpId: a.id }));
-      else if (groupSync(sheet)) M.rows[sheet.id].push(fixRow({ account: a.name, group: groupIdByName(a.group), totpId: a.id }));
+      else if (groupSync(sheet) && !hiddenIn(sheet, groupIdByName(a.group))) M.rows[sheet.id].push(fixRow({ account: a.name, group: groupIdByName(a.group), totpId: a.id }));
       else continue;
       n++;
     }
@@ -342,7 +342,11 @@
   function heads(sheet, r) { return sheet.mode === 'accounts' ? 0 : sheet.mode === 'members' ? r.members.length : num(r.count); }
   // 「只存账号」表可以认领一个验证码分组（totpGroup）：这个分组的账号归它，不再出现在 AI 合租里
   const ownedGroupNames = () => new Set(S.sheets.filter(x => x.mode === 'accounts' && x.totpGroup).map(x => x.totpGroup));
-  const visibleGroups = () => { const own = ownedGroupNames(); return G.filter(g => !own.has(g.name)); };
+  // 分组表可以在自己这里隐藏某些分组（sheet.hideGroups = [分组 id]）：只是这张表不显示，账号验证码里的分组和账号都不动
+  const hiddenIn = (sh, id) => !!sh && Array.isArray(sh.hideGroups) && sh.hideGroups.includes(id);
+  const visibleGroups = sh => { const own = ownedGroupNames(); return G.filter(g => !own.has(g.name) && !hiddenIn(sh, g.id)); };
+  // 算「未分组」时用：分组还在、也没在这张表隐藏的（被「只存账号」表认领的照旧不算未分组）
+  const shownIds = sh => new Set(G.filter(g => !hiddenIn(sh, g.id)).map(g => g.id));
   const sheetForGroup = name => S.sheets.find(x => x.mode === 'accounts' && x.totpGroup && x.totpGroup === name) || null;
   const zero = () => ({ n: 0, heads: 0, income: 0, cost: 0, profit: 0 });
   function stats(sheet, rows) {
@@ -359,8 +363,8 @@
       if (sh.mode === 'accounts') continue;
       const rows = (M.rows[sh.id] || []);
       if (sh.grouped) {
-        const ids = new Set(G.map(g => g.id));
-        for (const g of visibleGroups()) out.push({ key: 'g:' + g.id, label: g.name, color: g.color, text: g.text, sheet: sh.id, rows: rows.filter(r => r.group === g.id).length, st: stats(sh, rows.filter(r => r.group === g.id)) });
+        const ids = shownIds(sh);
+        for (const g of visibleGroups(sh)) out.push({ key: 'g:' + g.id, label: g.name, color: g.color, text: g.text, sheet: sh.id, rows: rows.filter(r => r.group === g.id).length, st: stats(sh, rows.filter(r => r.group === g.id)) });
         const loose = rows.filter(r => !ids.has(r.group));
         if (loose.length) out.push({ key: 'loose:' + sh.id, label: '未分组', color: LOOSE.color, text: LOOSE.text, sheet: sh.id, rows: loose.length, st: stats(sh, loose) });
       } else out.push({ key: 's:' + sh.id, label: sh.name, color: null, sheet: sh.id, rows: rows.length, st: stats(sh, rows) });
@@ -1227,12 +1231,12 @@
     const q = h('input', { type: 'search', placeholder: '搜索账号、备注、卡种', value: view.q, 'aria-label': '搜索' });
     q.addEventListener('input', () => { view.q = q.value; applySearch(); });
     const bar = h('div', { class: 'toolbar' }, h('label', { class: 'search' }, icon('search', 15), q));
-    if (sheet.grouped) bar.append(groupChips(rows));
+    if (sheet.grouped) bar.append(groupChips(rows, sheet));
     bar.append(h('span', { class: 'spacer' }), h('button', { class: 'btn ghost small', type: 'button', text: '表设置', onclick: e => sheetMenu(e.currentTarget, sheet) }));
     out.push(bar);
     if (sheet.grouped) {
-      const ids = new Set(G.map(g => g.id)), f = view.gfilter;
-      visibleGroups().forEach(g => { if (f === null || f === g.id) out.push(section(sheet, rows, g, r => r.group === g.id, editable, live)); });
+      const ids = shownIds(sheet), f = view.gfilter;
+      visibleGroups(sheet).forEach(g => { if (f === null || f === g.id) out.push(section(sheet, rows, g, r => r.group === g.id, editable, live)); });
       if ((f === null || f === '__loose') && rows.some(r => !ids.has(r.group))) out.push(section(sheet, rows, LOOSE, r => !ids.has(r.group), editable, live));
       if (!G.length) out.push(h('div', { class: 'empty', text: '还没有分组，点上面的“管理分组”新建。' }));
     } else out.push(section(sheet, rows, null, () => true, editable, live));
@@ -1297,7 +1301,7 @@
     if (!sheet.grouped && sheet.mode !== 'accounts') return addRowDialog(sheet);
     const owned = sheet.mode === 'accounts' && sheet.totpGroup ? sheet.totpGroup : '';
     const ac = acctPicker(sheet);
-    const groupSel = h('select', null, h('option', { value: '', text: '未分组' }), visibleGroups().map(g => h('option', { value: g.id, text: g.name, selected: !!preset.group && g.id === preset.group.id })));
+    const groupSel = h('select', null, h('option', { value: '', text: '未分组' }), visibleGroups(sheet).map(g => h('option', { value: g.id, text: g.name, selected: !!preset.group && g.id === preset.group.id })));
     const password = h('input', { type: 'text', placeholder: '可不填；加密保存', autocomplete: 'off', spellcheck: false });
     const fPw = h('label', { class: 'field' }, '账号登录密码', password);
     const sp = syncPart(sheet.mode === 'accounts' && !owned);
@@ -1344,8 +1348,8 @@
 
   // ---------- 分组筛选条（和验证码列表一样：点一下筛选，拖动调整顺序） ----------
   let dragGroup = null;
-  function groupChips(rows) {
-    const ids = new Set(G.map(g => g.id)), counts = {}; let loose = 0;
+  function groupChips(rows, sheet) {
+    const ids = shownIds(sheet), counts = {}; let loose = 0;
     rows.forEach(r => { if (ids.has(r.group)) counts[r.group] = (counts[r.group] || 0) + 1; else loose++; });
     if (view.gfilter === '__loose' ? !loose : view.gfilter !== null && !ids.has(view.gfilter)) view.gfilter = null;
     const box = h('div', { class: 'chipset gchips' });
@@ -1356,9 +1360,9 @@
       return b;
     };
     box.append(chip('全部', null, rows.length));
-    visibleGroups().forEach(g => box.append(chip(g.name, g.id, counts[g.id] || 0, g)));
+    visibleGroups(sheet).forEach(g => box.append(chip(g.name, g.id, counts[g.id] || 0, g)));
     if (loose) box.append(chip('未分组', '__loose', loose));
-    box.append(h('button', { class: 'btn ghost small', type: 'button', text: G.length ? '管理分组' : '＋ 新建分组', onclick: e => groupsMenu(e.currentTarget) }));
+    box.append(h('button', { class: 'btn ghost small', type: 'button', text: G.length ? '管理分组' : '＋ 新建分组', onclick: e => groupsMenu(e.currentTarget, sheet) }));
     return box;
   }
   function dragChip(b, g) {
@@ -1473,11 +1477,31 @@
       [{ text: '取消' }, { text: '新建', cls: 'primary', value: true, run: () => { if (!name.value.trim()) { name.focus(); return false; } } }]);
     return ok ? createGroup(name.value.trim()) : null;
   }
-  function groupsMenu(btn) {
+  function groupsMenu(btn, sheet) {
     menu(btn, [
       { text: '新建分组…', run: async () => { if (await newGroupDialog()) render(); } },
-      { text: '改名、换颜色、排序、删除（去分组管理页）', run: () => leave('/admin/groups') },
-    ]);
+      sheet ? { text: '这张表显示哪些分组…', run: () => groupsShownDialog(sheet) } : null,
+      { text: '改名、换颜色、删除分组（账号验证码也会跟着变）…', run: () => leave('/admin/groups') },
+    ].filter(Boolean));
+  }
+  // 只在这张表里隐藏 / 显示分组，不动账号验证码
+  async function groupsShownDialog(sheet) {
+    const own = ownedGroupNames(), M = S.months[view.month], rows = M ? (M.rows[sheet.id] || []) : [];
+    const list = G.filter(g => !own.has(g.name));
+    const boxes = list.map(g => {
+      const n = rows.filter(r => r.group === g.id).length;
+      const cb = h('input', { type: 'checkbox', checked: !hiddenIn(sheet, g.id) });
+      return { g, cb, el: h('label', { class: 'check' }, cb, h('span', { class: 'gdot', style: 'background:' + g.color }), g.name, h('span', { class: 'faint small', text: n ? '  这个月 ' + n + ' 个账号' : '' })) };
+    });
+    const ok = await dialog(sheet.name + ' 显示哪些分组', [
+      h('div', { class: 'form' }, boxes.map(b => b.el)),
+      h('div', { class: 'muted small', text: '去掉勾只是这张表里不显示这个分组：账号验证码里的分组和账号都不会动，也不会删。这个分组里已经记在这张表的账号会放到「未分组」；验证码里这个分组新加的账号也不会再自动加进这张表。' }),
+    ], [{ text: '取消' }, { text: '保存', cls: 'primary', value: true }]);
+    if (!ok) return;
+    const hide = boxes.filter(b => !b.cb.checked).map(b => b.g.id);
+    if (hide.length) sheet.hideGroups = hide; else delete sheet.hideGroups;
+    if (view.gfilter && hide.includes(view.gfilter)) view.gfilter = null;
+    touch(); render(); setStatus('已保存分组显示');
   }
   async function sheetForm(sheet) {
     const name = h('input', { type: 'text', value: sheet ? sheet.name : '', placeholder: '如 YouTube' });
