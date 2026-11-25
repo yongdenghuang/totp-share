@@ -205,6 +205,17 @@ extension Dictionary where Key == String, Value == Any {
         var months = dict("months"), M = months.dict(ym), rows = M.dict("rows")
         rows[sheet] = rows.list(sheet).filter { $0.str("id") != id }; M["rows"] = rows; months[ym] = M; self["months"] = months
     }
+    mutating func unskipTotp(_ id: Int) {
+        let list = (self["totpSkip"] as? [Any])?.compactMap { ($0 as? Int) ?? ($0 as? NSNumber)?.intValue } ?? []
+        self["totpSkip"] = list.filter { $0 != id }
+    }
+    /// 分组表的「分组和账号验证码同步」（默认开；关掉存成 syncGroups = false）
+    mutating func setSheetSync(id: String, on: Bool) {
+        editList("sheets") { l in
+            guard let i = l.firstIndex(where: { $0.str("id") == id }) else { return }
+            if on { l[i]["syncGroups"] = nil } else { l[i]["syncGroups"] = false }
+        }
+    }
     mutating func skipTotp(_ id: Int) {
         var list = (self["totpSkip"] as? [Any])?.compactMap { ($0 as? Int) ?? ($0 as? NSNumber)?.intValue } ?? []
         if !list.contains(id) { list.append(id) }

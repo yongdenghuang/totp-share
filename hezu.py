@@ -23,6 +23,15 @@ import hezu_export
 import hezu_xlsx
 
 API_PREFIX = "/admin/hezu/api/"
+WEB_CLIENT_MIN = 2   # 网页 app.js 里的 CLIENT_VERSION；改了同步规则时调高，旧页面就存不进来
+
+
+def _int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
 MAX_BODY = 8 * 1024 * 1024       # 账本和导入的 Excel 都比全站 64KB 的上限大
 HISTORY_DAYS = 60
 UNGROUPED_COLOR = "#6c757d"
@@ -401,6 +410,10 @@ def install(core):
         state = data.get("state") if data else None
         if not valid_state(state):
             return jsonify(ok=False, error="数据结构不对"), 400
+        # 浏览器里开着的旧页面（规则旧了，比如不认「分组不同步」）：不让它保存，提示刷新。
+        # App 自己的请求（不是浏览器）不受影响。
+        if "Mozilla" in (request.headers.get("User-Agent") or "") and _int(data.get("client")) < WEB_CLIENT_MIN:
+            return jsonify(ok=False, stale=True, error="这个页面是旧版本，请刷新后再改"), 409
         state.pop("rev", None)
         state.pop("groups", None)   # 分组以验证码后台的为准，不随账本保存
         rev = save_state(state, data.get("rev"))

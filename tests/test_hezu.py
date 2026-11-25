@@ -466,3 +466,14 @@ def test_share_links_on_demand(ctx):
     d = call(c, "post", "/admin/hezu/api/share-links", json={"ids": ids}).get_json()
     assert d["ok"] and set(d["links"]) == {str(i) for i in ids} and all(d["links"].values())
     assert call(c, "post", "/admin/hezu/api/share-links", json={"ids": ["x"]}).status_code == 400
+
+
+def test_stale_browser_page_cannot_save(ctx):
+    # 浏览器里开着的旧页面（没带新版本号）存不进来，提示刷新；新页面和 App 照常保存
+    c = ctx.admin()
+    ua = {"User-Agent": "Mozilla/5.0 (Macintosh) Chrome/140"}
+    r = call(c, "put", f"{API}/state", json={"rev": 0, "state": sample_state()}, headers=ua)
+    assert r.status_code == 409 and r.get_json()["stale"]
+    assert call(c, "put", f"{API}/state", json={"rev": 0, "state": sample_state(), "client": 2}, headers=ua).status_code == 200
+    app_ua = {"User-Agent": "合租管理/1 CFNetwork/3826 Darwin/25.0"}
+    assert call(c, "put", f"{API}/state", json={"rev": 1, "state": sample_state()}, headers=app_ua).status_code == 200

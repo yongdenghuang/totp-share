@@ -248,7 +248,8 @@
     for (const a of A) if (!have.has(a.id) && !skip.has(a.id)) {
       const own = sheetForGroup(a.group);   // 这个分组归「只存账号」表的，加到那张表里
       if (own) M.rows[own.id].push(fixRow({ account: a.name, totpId: a.id }));
-      else M.rows[sheet.id].push(fixRow({ account: a.name, group: groupIdByName(a.group), totpId: a.id }));
+      else if (groupSync(sheet)) M.rows[sheet.id].push(fixRow({ account: a.name, group: groupIdByName(a.group), totpId: a.id }));
+      else continue;
       n++;
     }
     return n > 0;
@@ -283,13 +284,15 @@
   // ---------- 分组两边保持一致 ----------
   // 关联了验证码账号的行，分组以验证码账号为准；只动进行中的月份，存档保持当时的样子。
   const groupIdByName = name => { const g = G.find(x => x.name === name); return g ? g.id : ''; };
+  // 分组表的「分组和验证码账号同步」：默认开；关掉后两边各管各的分组，验证码新加的账号也不再自动出现在这张表里
+  const groupSync = sh => !!sh && !!sh.grouped && sh.syncGroups !== false;
   // 关联了验证码账号的行：账号名和分组都以验证码账号为准（存档月份保持当时的样子）
   function pullGroups() {
     let n = 0;
     for (const ym in S.months) if (!S.months[ym].archived) for (const sh of S.sheets) for (const r of S.months[ym].rows[sh.id] || []) {
       const a = r.totpId > 0 ? totpById(r.totpId) : null; if (!a) continue;
       if (a.name && r.account !== a.name) { r.account = a.name; n++; }
-      if (!sh.grouped) continue;
+      if (!groupSync(sh)) continue;
       const gid = groupIdByName(a.group);
       if (r.group !== gid) { r.group = gid; n++; }
     }
@@ -315,7 +318,7 @@
   function onLinked(row, sheet, ym) {
     const a = totpById(row.totpId);
     if (!a || !sheet.grouped || S.months[ym].archived) return;
-    if (!a.group && row.group && G.some(g => g.id === row.group)) pushGroup(a.id, row.group);
+    if (groupSync(sheet) && !a.group && row.group && G.some(g => g.id === row.group)) pushGroup(a.id, row.group);
     if (row.password && !a.hasPassword) {
       const pw = row.password;
       api('POST', '/admin/accounts/' + a.id + '/password', { password: pw }).then(r => { if (r.ok) { a.hasPassword = true; if (row.password === pw) { row.password = ''; touch(); } } });
@@ -323,7 +326,7 @@
   }
   function moveRow(row, groupId) {
     row.group = groupId;
-    if (row.totpId > 0 && totpById(row.totpId) && !S.months[view.month].archived) { pushGroup(row.totpId, groupId); pullGroups(); }
+    if (row.totpId > 0 && totpById(row.totpId) && !S.months[view.month].archived && groupSync(S.sheets.find(x => x.id === view.tab))) { pushGroup(row.totpId, groupId); pullGroups(); }
     touch(); render();
   }
   function newVps() { return { id: uid(), host: '', site: '', ip: '', port: '', password: '', tags: [], traffic: '', renew: '', price: '', email: '', loginPassword: '' }; }
@@ -491,6 +494,8 @@
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkFresh(); });
   window.addEventListener('focus', checkFresh);
 
+  // 网页版本号：服务器拒收旧页面的保存，免得开着没刷新的旧页面按旧规则把账本改回去
+  const CLIENT_VERSION = 2;
   let conflicts = 0;
   async function save() {
     if (saving || !dirty) return;
@@ -502,7 +507,7 @@
     }
     const sent = bare(S);
     try {
-      const r = await api('PUT', '/state', { rev: S.rev, state: S });
+      const r = await api('PUT', '/state', { rev: S.rev, state: S, client: CLIENT_VERSION });
       if (r.status === 401) { dirty = true; again = 5000; setStatus('登录已过期，改动还没保存', true); showRelogin(true); }
       else if (r.status === 409) {
         // 别的窗口先存了：把两边的改动合并后再存，不丢本页的改动
@@ -549,7 +554,7 @@
     view.month = latestMonth();
     const sheet = S.sheets.find(s => s.grouped) || S.sheets[0];
     if (sheet) view.tab = sheet.id;
-    render(); addAccountDialog({ sheet });
+    render(); if (sheet) addAccountDialog({ sheet, group: null });
   }
   async function load() {
     const r = await fetch(API + '/state', { credentials: 'same-origin' });
@@ -1234,85 +1239,107 @@
     return out;
   }
 
-  // ---------- 添加账号：账本记录和验证码账号统一从这里加 ----------
+  // ---------- 添加账号 ----------
+  // 账号可以从验证码账号里直接选（关联上），也可以手动填；手动填的可以勾选「同时添加到账号验证码」。
+  // 手动填、不同步的就是这张表自己的账号：记成 totpId = -1，以后也不会按名字自动关联到别处。
+  function acctPicker(sheet) {
+    const name = h('input', { type: 'text', placeholder: '输入账号，或在下面的验证码账号里点一个', autocomplete: 'off', spellcheck: false });
+    const list = h('div', { class: 'picklist acct-pick' });
+    const chosen = h('div', { class: 'acct-chosen', hidden: true });
+    const here = new Set(((S.months[view.month] || { rows: {} }).rows[sheet.id] || []).map(r => r.totpId).filter(x => x > 0));
+    let picked = null, changed = () => {};
+    const draw = () => {
+      const k = normName(name.value);
+      const items = picked ? [] : A.filter(a => !k || normName(a.name + ' ' + (a.group || '')).includes(k)).slice(0, 40);
+      setKids(list, h('div', { class: 'label', text: items.length ? '从账号验证码里选（' + items.length + (items.length === 40 ? '+' : '') + '）' : (k ? '验证码账号里没有，按手动添加' : '') }),
+        items.map(a => h('button', { class: 'item', type: 'button', onclick: () => pick(a) }, a.name,
+          h('span', { class: 'faint', text: '  ' + (a.group || '未分组') + (here.has(a.id) ? ' · 已在这张表' : '') }))));
+      list.hidden = !!picked || (!items.length && !k);
+    };
+    const unpick = () => { picked = null; name.readOnly = false; chosen.hidden = true; draw(); changed(); name.focus(); };
+    const pick = a => {
+      picked = a; name.value = a.name; name.readOnly = true;
+      setKids(chosen, icon('link', 14), h('span', { text: '关联验证码账号（' + (a.group || '未分组') + '）' }),
+        h('button', { class: 'btn ghost xs', type: 'button', text: '改成手动填', onclick: unpick }));
+      chosen.hidden = false; draw(); changed();
+    };
+    name.addEventListener('input', draw); draw();
+    return { name, list, chosen, picked: () => picked, onChange: f => { changed = f; } };
+  }
+  // 「同时添加到账号验证码」：要填 TOTP 密钥（验证码账号就是存两步验证的）
+  function syncPart(groupChoice) {
+    const box = h('input', { type: 'checkbox' });
+    const secret = h('input', { type: 'text', placeholder: '网站「两步验证」给的密钥（Base32）', autocomplete: 'off', spellcheck: false });
+    const grp = groupChoice ? h('select', null, h('option', { value: '', text: '未分组' }), G.map(g => h('option', { value: g.name, text: g.name }))) : null;
+    const fields = h('div', { class: 'form sync-fields', hidden: true },
+      h('label', { class: 'field' }, 'TOTP 密钥', secret), grp ? h('label', { class: 'field' }, '验证码分组', grp) : null);
+    const row = h('label', { class: 'check' }, box, '同时添加到账号验证码');
+    box.addEventListener('change', () => { fields.hidden = !box.checked; if (box.checked) secret.focus(); });
+    return { row, fields, on: () => box.checked, secret, grp, show: v => { row.hidden = !v; fields.hidden = !v || !box.checked; } };
+  }
+  // 建验证码账号（重名先确认）。返回新账号 id；失败返回 0 并把原因写进 err
+  async function createTotp(body, err) {
+    let r = await api('POST', '/accounts', body), d = await r.json().catch(() => ({}));
+    if (r.status === 409 && d.duplicate) {
+      if (!await confirmBox('已有同名的验证码账号', d.error + '\n确认不是重复添加的话，可以继续。', '仍然添加')) return 0;
+      r = await api('POST', '/accounts', Object.assign({ confirmDuplicate: true }, body)); d = await r.json().catch(() => ({}));
+    }
+    if (!r.ok || !d.ok) { err.textContent = d.error || '添加失败，请重试。'; return 0; }
+    useContext(d); skipTotp(d.id, false);
+    return d.id;
+  }
+
+  // AI 合租（分组表）和「只存账号」表的添加账号
   async function addAccountDialog(preset) {
     preset = preset || {};
-    if (preset.sheet && preset.sheet.mode === 'accounts' && !preset.group) preset.group = G.find(g => g.name === preset.sheet.totpGroup) || null;
-    if (preset.sheet && !preset.sheet.grouped && preset.sheet.mode !== 'accounts') return addRowDialog(preset.sheet);
-    const name = h('input', { type: 'text', placeholder: '账号邮箱或名称', autocomplete: 'off', spellcheck: false });
-    // 从某张表 / 某个分组里点进来的：表固定，分组默认就是那个分组
-    const fixed = !!preset.sheet && 'group' in preset;
-    const groupSel = h('select');
-    const secret = h('input', { type: 'text', placeholder: '没开两步验证就留空', autocomplete: 'off', spellcheck: false });
-    const password = h('input', { type: 'text', placeholder: '可不填；加密保存在验证码账号里', autocomplete: 'off', spellcheck: false });
-    const toLedger = h('input', { type: 'checkbox', checked: true });
-    // 只有分组表（AI 合租）的账号会关联验证码，所以只在这类表之间选
-    const ledgerSheets = S.sheets.filter(s => s.grouped || s.mode === 'accounts');
-    const sheetSel = h('select', null, ledgerSheets.map(s => h('option', { value: s.id, text: s.name, selected: !!preset.sheet && s.id === preset.sheet.id })));
-    const fSheet = h('label', { class: 'field', hidden: fixed || ledgerSheets.length < 2 }, '记到哪张表', sheetSel);
+    const sheet = preset.sheet;
+    if (!sheet) return;
+    if (!sheet.grouped && sheet.mode !== 'accounts') return addRowDialog(sheet);
+    const owned = sheet.mode === 'accounts' && sheet.totpGroup ? sheet.totpGroup : '';
+    const ac = acctPicker(sheet);
+    const groupSel = h('select', null, h('option', { value: '', text: '未分组' }), visibleGroups().map(g => h('option', { value: g.id, text: g.name, selected: !!preset.group && g.id === preset.group.id })));
+    const password = h('input', { type: 'text', placeholder: '可不填；加密保存', autocomplete: 'off', spellcheck: false });
+    const fPw = h('label', { class: 'field' }, '账号登录密码', password);
+    const sp = syncPart(sheet.mode === 'accounts' && !owned);
+    const hint = h('div', { class: 'muted small' });
     const err = h('div', { class: 'neg' });
-    // 分组选项跟着表走：只存账号表只能是它认领的分组；AI 合租不列被别的表认领的分组
-    let wantGroup = preset.group ? preset.group.id : groupSel.value;
-    const fillGroups = () => {
-      const sh = toLedger.checked ? S.sheets.find(x => x.id === sheetSel.value) : null;
-      let list = G, loose = true;
-      if (sh && sh.mode === 'accounts' && sh.totpGroup) { list = G.filter(g => g.name === sh.totpGroup); loose = !list.length; }
-      else if (sh && sh.grouped) list = visibleGroups();
-      const keep = wantGroup;
-      setKids(groupSel, loose ? h('option', { value: '', text: '未分组' }) : null, list.map(g => h('option', { value: g.id, text: g.name })));
-      groupSel.value = list.some(g => g.id === keep) ? keep : (loose ? '' : list[0].id);
-      groupSel.disabled = list.length === 1 && !loose;
+    const refresh = () => {
+      const a = ac.picked(), g = G.find(x => x.id === groupSel.value);
+      sp.show(!a); fPw.hidden = !!a;
+      hint.textContent = a && sheet.grouped && groupSync(sheet) && g && a.group !== g.name
+        ? '分组同步开着：验证码账号那边的分组会跟着改成「' + g.name + '」。不想同步可以在「表设置」里关掉。' : '';
     };
-    groupSel.addEventListener('change', () => { wantGroup = groupSel.value; });
-    sheetSel.addEventListener('change', fillGroups);
-    toLedger.addEventListener('change', () => { fSheet.hidden = fixed || !toLedger.checked; fillGroups(); });
-    fillGroups();
-    let made = null, note = '';
+    ac.onChange(refresh); groupSel.addEventListener('change', refresh); refresh();
+    let made = null;
     const submit = async () => {
       err.textContent = '';
-      const n = name.value.trim(), sec = secret.value.trim(), pw = password.value.trim();
-      const sheet = S.sheets.find(x => x.id === sheetSel.value), g = G.find(x => x.id === groupSel.value);
-      if (!n) { name.focus(); return false; }
-      if ((!toLedger.checked || !sheet) && !sec) { err.textContent = '不记入账本的话，至少要填 TOTP 密钥（否则什么都没添加）。'; return false; }
-      if (pw && !sec) { err.textContent = '登录密码是存在验证码账号里的，要存密码请同时填 TOTP 密钥。'; return false; }
-      let totpId = 0;
-      if (sec) {
-        const body = { name: n, secret: sec, password: pw, group: g ? g.name : '' };
-        let r = await api('POST', '/accounts', body), d = await r.json().catch(() => ({}));
-        if (r.status === 409 && d.duplicate) {
-          if (!await confirmBox('已有同名的验证码账号', d.error + '\n确认不是重复添加的话，可以继续。', '仍然添加')) return false;
-          r = await api('POST', '/accounts', Object.assign({ confirmDuplicate: true }, body)); d = await r.json().catch(() => ({}));
-        }
-        if (!r.ok || !d.ok) { err.textContent = d.error || '添加失败，请重试。'; return false; }
-        useContext(d); totpId = d.id;
-        skipTotp(totpId, !toLedger.checked);
-        if (!toLedger.checked) touch();
+      const n = ac.name.value.trim(), a = ac.picked(), g = G.find(x => x.id === groupSel.value), pw = password.value.trim();
+      if (!n) { ac.name.focus(); return false; }
+      let totpId = -1;
+      if (a) {
+        totpId = a.id; skipTotp(a.id, false);
+        if (sheet.grouped && groupSync(sheet) && g && a.group !== g.name) pushGroup(a.id, g.id);
+      } else if (sp.on()) {
+        const sec = sp.secret.value.trim();
+        if (!sec) { err.textContent = '同时添加到账号验证码需要填 TOTP 密钥；没有两步验证的账号就别勾这个。'; sp.secret.focus(); return false; }
+        totpId = await createTotp({ name: n, secret: sec, password: pw, group: owned || (sp.grp ? sp.grp.value : (g ? g.name : '')) }, err);
+        if (!totpId) return false;
       }
-      if (toLedger.checked && sheet) {
-        made = fixRow({ account: n, group: sheet.grouped && g ? g.id : '', totpId });
-        S.months[view.month].rows[sheet.id].push(made);
-        view.tab = sheet.id; view.q = '';
-        if (!totpId) {   // 没填密钥但验证码那边已有同名账号：同一分组才关联，否则这条就是另一个账号
-          linkTotp();
-          const same = A.filter(a => normName(a.name) === normName(n));
-          if (!made.totpId && same.length) { made.totpId = -1; note = '验证码里的同名账号在「' + (same[0].group || '未分组') + '」分组，这条没有和它关联'; }
-        }
-        touch();
-      }
+      made = fixRow({ account: n, group: sheet.grouped && g ? g.id : '', totpId, password: totpId > 0 ? '' : pw });
+      S.months[view.month].rows[sheet.id].push(made);
+      view.tab = sheet.id; view.q = '';
+      pullGroups(); touch();
     };
-    const ok = await dialog('添加账号', [
-      h('label', { class: 'field' }, '账号', name),
-      h('label', { class: 'field' }, '分组', groupSel),
-      h('label', { class: 'field' }, 'TOTP 密钥（两步验证）', secret),
-      h('label', { class: 'field' }, '账号登录密码', password),
-      ledgerSheets.length ? h('label', { class: 'check' }, toLedger, '同时记入' + (ledgerSheets.length === 1 ? ' ' + ledgerSheets[0].name + ' ' : '合租账本') + '（' + ymLabel(view.month) + '）') : null, fSheet,
-      h('div', { class: 'muted', text: '填了 TOTP 密钥会同时建好验证码账号和分享链接，两边自动关联、分组一致。续费日期、续费卡、收费等在表格里接着填。' }),
+    const ok = await dialog('添加账号到 ' + sheet.name, [
+      h('label', { class: 'field' }, '账号', ac.name), ac.chosen, ac.list,
+      sheet.grouped ? h('label', { class: 'field' }, '分组', groupSel) : (owned ? h('div', { class: 'muted small', text: '验证码分组：' + owned }) : null),
+      hint, fPw, sp.row, sp.fields,
+      h('div', { class: 'muted', text: sheet.mode === 'accounts' ? '选了验证码账号的，分享链接、改密码等都用它的。' : '续费日期、续费卡、收费等在表格里接着填。' }),
       err,
     ], [{ text: '取消' }, { text: '添加', cls: 'primary', value: true, run: submit }]);
     if (!ok) return;
     render(); pollCodes();
-    if (made) { const inp = document.querySelectorAll('[data-row="' + made.id + '"] input')[0]; if (inp) { inp.scrollIntoView({ block: 'center' }); } if (note) setStatus(note); }
-    else setStatus('已添加验证码账号');
+    if (made) { const inp = document.querySelectorAll('[data-row="' + made.id + '"] input')[0]; if (inp) inp.scrollIntoView({ block: 'center' }); }
   }
 
   // ---------- 分组筛选条（和验证码列表一样：点一下筛选，拖动调整顺序） ----------
@@ -1372,7 +1399,9 @@
   async function addRowDialog(sheet) {
     if (sheet.mode === 'resale') return addResaleDialog(sheet);
     const unit = sheet.mode === 'unit';
-    const name = h('input', { type: 'text', placeholder: '账号邮箱或名称', autocomplete: 'off', spellcheck: false });
+    const ac = acctPicker(sheet), name = ac.name;
+    const sp = syncPart(true), err = h('div', { class: 'neg' });
+    ac.onChange(() => sp.show(!ac.picked()));
     const renew = h('input', { type: 'date' });
     const price = h('input', { type: 'text', inputMode: 'decimal', placeholder: '每人每月', autocomplete: 'off' });
     const count = h('input', { type: 'text', inputMode: 'numeric', placeholder: '几个人', autocomplete: 'off' });
@@ -1380,19 +1409,31 @@
     const note = h('input', { type: 'text', placeholder: '可不填', autocomplete: 'off' });
     let made = null;
     const ok = await dialog('添加账号到 ' + sheet.name, [
-      h('label', { class: 'field' }, '账号', name),
+      h('label', { class: 'field' }, '账号', name), ac.chosen, ac.list,
       h('label', { class: 'field' }, '续费日期', renew),
       unit ? h('div', { class: 'field-row' }, h('label', { class: 'field' }, '单价', price), h('label', { class: 'field' }, '人数', count)) : null,
       h('label', { class: 'field' }, '续费成本', cost),
       h('label', { class: 'field' }, '备注', note),
+      sp.row, sp.fields,
       h('div', { class: 'muted', text: unit ? '续费卡在表格里选；收费 = 单价 × 人数，自动算。' : '续费卡和每人收费在表格里接着填。' }),
-    ], [{ text: '取消' }, { text: '添加', cls: 'primary', value: true, run: () => {
-      if (!name.value.trim()) { name.focus(); return false; }
-      made = fixRow({ account: name.value.trim(), renew: renew.value, unitPrice: num(price.value), count: num(count.value), cost: num(cost.value), note: note.value.trim() });
+      err,
+    ], [{ text: '取消' }, { text: '添加', cls: 'primary', value: true, run: async () => {
+      err.textContent = '';
+      const n = name.value.trim(), a = ac.picked();
+      if (!n) { name.focus(); return false; }
+      let totpId = -1;
+      if (a) { totpId = a.id; skipTotp(a.id, false); }
+      else if (sp.on()) {
+        const sec = sp.secret.value.trim();
+        if (!sec) { err.textContent = '同时添加到账号验证码需要填 TOTP 密钥；没有两步验证的账号就别勾这个。'; sp.secret.focus(); return false; }
+        totpId = await createTotp({ name: n, secret: sec, password: '', group: sp.grp.value }, err);
+        if (!totpId) return false;
+      }
+      made = fixRow({ account: n, renew: renew.value, unitPrice: num(price.value), count: num(count.value), cost: num(cost.value), note: note.value.trim(), totpId });
     } }]);
     if (!ok || !made) return;
     S.months[view.month].rows[sheet.id].push(made);
-    linkTotp(); touch(); render();
+    pullGroups(); touch(); render(); pollCodes();
     const inp = document.querySelector('[data-row="' + made.id + '"] input'); if (inp) inp.scrollIntoView({ block: 'center' });
   }
 
@@ -1448,12 +1489,16 @@
     const grp = h('select', null, h('option', { value: '', text: '不认领' }), G.map(g => h('option', { value: g.name, text: g.name, selected: !!sheet && sheet.totpGroup === g.name })));
     const fGrp = h('label', { class: 'field', hidden: mode.value !== 'accounts' }, '这个验证码分组的账号放到这张表', grp);
     mode.addEventListener('change', () => { fGrp.hidden = mode.value !== 'accounts'; });
-    const ok = await dialog(sheet ? '修改表' : '新建表', [h('label', { class: 'field' }, '名称', name), h('label', { class: 'field' }, '收费方式', mode), fGrp],
+    const sync = h('input', { type: 'checkbox', checked: groupSync(sheet) });
+    const fSync = sheet && sheet.grouped ? h('div', null, h('label', { class: 'check' }, sync, '分组和账号验证码保持同步'),
+      h('div', { class: 'muted small', text: '开着：两边的分组一起变，验证码里新加的账号会自动出现在这张表。关掉：这张表的分组自己管（比如用 Google 账号注册的 Claude 可以放在 Claude 分组，同时关联 Google 的验证码），也不会自动加账号。' })) : null;
+    const ok = await dialog(sheet ? '修改表' : '新建表', [h('label', { class: 'field' }, '名称', name), h('label', { class: 'field' }, '收费方式', mode), fGrp, fSync],
       [{ text: '取消' }, { text: sheet ? '保存' : '新建', cls: 'primary', value: true, run: () => { if (!name.value.trim()) { name.focus(); return false; } } }]);
     if (!ok) return;
     if (sheet) { convertSheetMode(sheet, mode.value); sheet.name = name.value.trim(); sheet.mode = mode.value; }
     else { sheet = { id: 's_' + uid(), name: name.value.trim(), mode: mode.value }; S.sheets.push(sheet); view.tab = sheet.id; }
     if (mode.value === 'accounts' && grp.value) sheet.totpGroup = grp.value; else delete sheet.totpGroup;
+    if (fSync) { if (sync.checked) delete sheet.syncGroups; else sheet.syncGroups = false; }
     normalize(); touch(); render();
   }
   // 换收费方式时把还在进行的月份的数据换算过去（存档月份保持原样）
@@ -1474,7 +1519,7 @@
   }
   function sheetMenu(btn, sheet) {
     menu(btn, [
-      { text: '改名 / 改收费方式', run: () => sheetForm(sheet) },
+      { text: sheet.grouped ? '改名 / 收费方式 / 分组同步' : '改名 / 改收费方式', run: () => sheetForm(sheet) },
       { text: '删除这张表', danger: true, run: async () => {
         if (await confirmBox('删除表', '删除 “' + sheet.name + '” 这张表？\n它在所有月份里的账号都会一起删除，不能恢复。', '删除', true)) {
           S.sheets.splice(S.sheets.indexOf(sheet), 1);

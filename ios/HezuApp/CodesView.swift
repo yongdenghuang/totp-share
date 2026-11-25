@@ -106,12 +106,14 @@ final class CodesStore: ObservableObject {
         accounts.removeAll { $0.id == a.id }
     }
     /// 新建验证码账号（和网页上「添加账号」同一个接口）；同名时 duplicate = true，需要确认后带 confirm 再发一次
-    func add(name: String, secret: String, password: String, group: String, subgroup: String = "", confirmDuplicate: Bool) async throws {
+    @discardableResult
+    func add(name: String, secret: String, password: String, group: String, subgroup: String = "", confirmDuplicate: Bool) async throws -> Int {
         let d = try await api.post("/admin/hezu/api/accounts", ["name": name, "secret": secret, "password": password,
                                                                  "group": group, "confirmDuplicate": confirmDuplicate])
         let sub = subgroup.trimmingCharacters(in: .whitespaces), id = d.int("id")
         if !sub.isEmpty && id > 0 { _ = try? await api.post("/admin/accounts/\(id)/field", ["field": "subgroup", "value": sub]) }
         await load()
+        return id
     }
     private func update(_ id: Int, _ f: (inout TotpAccount) -> Void) {
         if let i = accounts.firstIndex(where: { $0.id == id }) { f(&accounts[i]) }
