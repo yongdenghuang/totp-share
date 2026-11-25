@@ -23,7 +23,7 @@ import hezu_export
 import hezu_xlsx
 
 API_PREFIX = "/admin/hezu/api/"
-WEB_CLIENT_MIN = 2   # 网页 app.js 里的 CLIENT_VERSION；改了同步规则时调高，旧页面就存不进来
+WEB_CLIENT_MIN = 3   # 网页 app.js 里的 CLIENT_VERSION；改了同步规则时调高，旧页面就存不进来
 
 
 def _int(v):

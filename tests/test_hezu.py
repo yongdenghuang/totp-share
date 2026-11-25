@@ -474,6 +474,6 @@ def test_stale_browser_page_cannot_save(ctx):
     ua = {"User-Agent": "Mozilla/5.0 (Macintosh) Chrome/140"}
     r = call(c, "put", f"{API}/state", json={"rev": 0, "state": sample_state()}, headers=ua)
     assert r.status_code == 409 and r.get_json()["stale"]
-    assert call(c, "put", f"{API}/state", json={"rev": 0, "state": sample_state(), "client": 2}, headers=ua).status_code == 200
+    assert call(c, "put", f"{API}/state", json={"rev": 0, "state": sample_state(), "client": 3}, headers=ua).status_code == 200
     app_ua = {"User-Agent": "合租管理/1 CFNetwork/3826 Darwin/25.0"}
     assert call(c, "put", f"{API}/state", json={"rev": 1, "state": sample_state()}, headers=app_ua).status_code == 200

@@ -499,7 +499,7 @@
   window.addEventListener('focus', checkFresh);
 
   // 网页版本号：服务器拒收旧页面的保存，免得开着没刷新的旧页面按旧规则把账本改回去
-  const CLIENT_VERSION = 2;
+  const CLIENT_VERSION = 3;
   let conflicts = 0;
   async function save() {
     if (saving || !dirty) return;
