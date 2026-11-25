@@ -17,7 +17,7 @@ def call(c, method, path, **kw):
 
 def sample_state(note=""):
     return {
-        "sheets": [{"id": "ai", "name": "AI 合租", "mode": "members", "grouped": True}],
+        "sheets": [{"id": "ai", "name": "AI 合租", "mode": "members", "grouped": True, "groups": []}],
         "months": {"2026-11": {"archived": False, "rows": {"ai": [
             {"id": "r1", "group": "", "account": "plus-01", "renew": "2026-11-15", "issuerId": "i1", "cardId": "c1",
              "members": [{"name": "", "amount": 35, "paid": True}], "cost": 105, "note": note}]}}},
@@ -474,6 +474,31 @@ def test_stale_browser_page_cannot_save(ctx):
     ua = {"User-Agent": "Mozilla/5.0 (Macintosh) Chrome/140"}
     r = call(c, "put", f"{API}/state", json={"rev": 0, "state": sample_state()}, headers=ua)
     assert r.status_code == 409 and r.get_json()["stale"]
-    assert call(c, "put", f"{API}/state", json={"rev": 0, "state": sample_state(), "client": 3}, headers=ua).status_code == 200
+    assert call(c, "put", f"{API}/state", json={"rev": 0, "state": sample_state(), "client": 4}, headers=ua).status_code == 200
     app_ua = {"User-Agent": "合租管理/1 CFNetwork/3826 Darwin/25.0"}
     assert call(c, "put", f"{API}/state", json={"rev": 1, "state": sample_state()}, headers=app_ua).status_code == 200
+
+
+def test_grouped_sheet_gets_its_own_groups_once(ctx):
+    # 老数据：AI 合租用的是验证码的分组。第一次打开时复制一份（id、名字、颜色照旧；认领的、隐藏的不复制），
+    # 之后两边各管各的：验证码那边改名、新建分组，AI 合租的分组不跟着变
+    c = ctx.admin()
+    for name in ("plus", "Claude 20x", "Google账号", "Adspower"):
+        call(c, "post", f"{API}/groups", json={"name": name})
+    gid = {g["name"]: g["id"] for g in call(c, "get", f"{API}/context").get_json()["groups"]}
+    st = sample_state()
+    st["sheets"][0].pop("groups")
+    st["sheets"][0].update(syncGroups=False, hideGroups=[gid["Google账号"]])
+    st["sheets"].append({"id": "s_ads", "name": "Adspower", "mode": "accounts", "totpGroup": "Adspower"})
+    st["months"]["2026-11"]["rows"]["ai"][0]["group"] = gid["Claude 20x"]
+    st["months"]["2026-11"]["rows"]["s_ads"] = []
+    assert save(c, st, 0).status_code == 200
+    d = call(c, "get", f"{API}/state").get_json()
+    ai = d["state"]["sheets"][0]
+    assert [g["name"] for g in ai["groups"]] == ["plus", "Claude 20x"] and "hideGroups" not in ai and "syncGroups" not in ai
+    assert ai["groups"][1]["id"] == gid["Claude 20x"] and ai["groups"][1]["color"].startswith("#")
+    assert d["state"]["months"]["2026-11"]["rows"]["ai"][0]["group"] == gid["Claude 20x"]
+    rev = d["rev"]
+    call(c, "post", f"{API}/groups", json={"name": "新分组"})
+    d = call(c, "get", f"{API}/state").get_json()
+    assert d["rev"] == rev and [g["name"] for g in d["state"]["sheets"][0]["groups"]] == ["plus", "Claude 20x"]

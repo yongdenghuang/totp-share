@@ -117,6 +117,11 @@ class Book:
     def issuer(self, iid):
         return next((i for i in self.issuers if i.get("id") == iid), None)
 
+    def groups_of(self, sh):
+        """分组表自己的分组（sheet.groups）；老数据没有的话用共用的那套。"""
+        own = sh.get("groups")
+        return own if isinstance(own, list) else self.G
+
     def card(self, cid):
         return next((c for c in self.cards if c.get("id") == cid), None)
 
@@ -125,8 +130,8 @@ class Book:
         for sh in self.S["sheets"]:
             rows = self.rows(ym, sh["id"])
             if sh.get("grouped"):
-                ids = {g["id"] for g in self.G}
-                for g in self.G:
+                ids = {g["id"] for g in self.groups_of(sh)}
+                for g in self.groups_of(sh):
                     mine = [r for r in rows if r.get("group") == g["id"]]
                     out.append({"key": "g:" + g["id"], "label": g["name"], "sheet": sh["id"], "rows": len(mine), "st": stats(sh, mine)})
                 loose = [r for r in rows if r.get("group") not in ids]
@@ -212,8 +217,8 @@ class Book:
             prof.append(M(ym) + [B(x) for x in ["全部合计", alln, total["heads"], total["income"], total["cost"], total["profit"]]])
         out.append({"name": "各类利润" if yearly else "利润汇总", "head": MH + ["类别", "账号数", "收费人数", "收费", "续费成本", "利润"], "rows": prof})
 
-        order = {g["id"]: i for i, g in enumerate(self.G)}
         for sh in self.S["sheets"]:
+            order = {g["id"]: i for i, g in enumerate(self.groups_of(sh))}
             members, resale = sh.get("mode") == "members", sh.get("mode") == "resale"
             rows = []
             for ym in months:
@@ -221,7 +226,7 @@ class Book:
                 if sh.get("grouped"):
                     lst = [r for _, r in sorted(enumerate(lst), key=lambda x: (order.get(x[1].get("group"), 9999), x[0]))]
                 for r in lst:
-                    g = next((x for x in self.G if x["id"] == r.get("group")), None)
+                    g = next((x for x in self.groups_of(sh) if x["id"] == r.get("group")), None)
                     it, c, inc = self.issuer(r.get("issuerId")), self.card(r.get("cardId")), income(sh, r)
                     line = M(ym) + ([g["name"] if g else "未分组"] if sh.get("grouped") else [])
                     line += [r.get("account") or "", d(r.get("renew")), it.get("name") if it else "", (it.get("country") or "") if it else "", card_label(c, True) if c else ""]

@@ -430,3 +430,9 @@ table.grid.unitsheet .cell.strong { font-size: 14.5px; }
 .dlg .acct-chosen { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--accent); margin-top: -4px; }
 .dlg .acct-chosen .btn { margin-left: auto; }
 .dlg .sync-fields { padding-left: 24px; display: grid; gap: 10px; }
+
+/* 分组表自己的分组：改名、换颜色、删除 */
+.dlg .grp-edit { display: grid; gap: 8px; max-height: 50vh; overflow-y: auto; }
+.dlg .grp-row { display: grid; grid-template-columns: 34px 1fr 64px auto; gap: 8px; align-items: center; }
+.dlg .grp-row input[type=color] { width: 34px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: none; }
+.dlg .grp-row.del input[type=text] { text-decoration: line-through; opacity: .5; }

@@ -73,8 +73,8 @@ struct SheetForm: View {
     @State private var name = ""
     @State private var mode = "unit"
     @State private var confirmDelete = false
-    @State private var syncGroups = true
-    @State private var hidden: Set<String> = []
+    @State private var groupsEdit: [EditGroup] = []
+    @State private var groupError: String?
     var onDeleted: (() -> Void)?
     private var grouped: Bool { ledger.sheet(sheetID)?.bool("grouped") ?? false }
 
@@ -91,21 +91,22 @@ struct SheetForm: View {
                 }
                 if grouped {
                     Section {
-                        Toggle("分组和账号验证码保持同步", isOn: $syncGroups)
-                    } footer: {
-                        Text(syncGroups ? "两边的分组一起变，验证码里新加的账号会自动出现在这张表。"
-                             : "这张表的分组自己管：比如用 Google 账号注册的 Claude 放在 Claude 分组，同时关联 Google 的验证码。验证码里新加的账号也不会自动加进来。")
-                    }
-                }
-                if grouped {
-                    Section {
-                        ForEach(ledger.visibleGroups) { g in
-                            Toggle(isOn: Binding(get: { !hidden.contains(g.id) }, set: { on in if on { hidden.remove(g.id) } else { hidden.insert(g.id) } })) {
-                                HStack(spacing: 8) { Circle().fill(Color(hex: g.color)).frame(width: 8, height: 8); Text(g.name) }
+                        ForEach($groupsEdit) { $g in
+                            HStack(spacing: 12) {
+                                Menu {
+                                    ForEach(groupPalette, id: \.0) { c in Button(c.1) { g.color = c.0 } }
+                                } label: { Circle().fill(Color(hex: g.color)).frame(width: 20, height: 20) }
+                                TextField("分组名称", text: $g.name)
                             }
                         }
-                    } header: { Text("这张表显示哪些分组") } footer: {
-                        Text("关掉只是这张表里不显示：账号验证码里的分组和账号都不会动，也不会删。这个分组里已经记在这张表的账号会放到「未分组」。")
+                        .onDelete { groupsEdit.remove(atOffsets: $0) }
+                        .onMove { groupsEdit.move(fromOffsets: $0, toOffset: $1) }
+                        Button { groupsEdit.append(EditGroup(id: "g_" + uid(), name: "", color: groupPalette[groupsEdit.count % groupPalette.count].0)) } label: { Label("新建分组", systemImage: "plus") }
+                    } header: {
+                        HStack { Text("分组"); Spacer(); EditButton().font(.caption) }
+                    } footer: {
+                        Text(groupError ?? "只是这张表自己的分组，账号验证码的分组不受影响。点圆点换颜色，左滑删除，点「编辑」拖动排序。删掉的分组里的账号放到「未分组」，账号不会删。")
+                            .foregroundStyle(groupError == nil ? Color.secondary : Color.bad)
                     }
                 }
                 if !sheetID.isEmpty && !grouped {
@@ -118,8 +119,14 @@ struct SheetForm: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(sheetID.isEmpty ? "新建" : "保存") {
                         let n = name.trimmingCharacters(in: .whitespaces), m = mode, id = sheetID.isEmpty ? "s_" + uid() : sheetID
-                        let g = grouped, on = syncGroups, hide = ledger.visibleGroups.map(\.id).filter { hidden.contains($0) }
-                        if sheetID.isEmpty { ledger.edit { $0.addSheet(id: id, name: n, mode: m) } } else { ledger.edit { $0.updateSheet(id: id, name: n, mode: m); if g { $0.setSheetSync(id: id, on: on); $0.setHiddenGroups(id: id, hidden: hide) } } }
+                        let g = grouped
+                        let gs: [JSON] = groupsEdit.map { ["id": $0.id, "name": $0.name.trimmingCharacters(in: .whitespaces), "color": $0.color, "text": textOn($0.color)] }
+                        if g {
+                            let names = gs.map { normName($0.str("name")) }
+                            if names.contains(where: \.isEmpty) { groupError = "分组名称不能是空的。"; return }
+                            if Set(names).count != names.count { groupError = "有两个分组同名了。"; return }
+                        }
+                        if sheetID.isEmpty { ledger.edit { $0.addSheet(id: id, name: n, mode: m) } } else { ledger.edit { $0.updateSheet(id: id, name: n, mode: m); if g { $0.setSheetGroups(id: id, groups: gs) } } }
                         toast.show("已保存"); dismiss()
                     }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
@@ -128,7 +135,7 @@ struct SheetForm: View {
                 Button("取消", role: .cancel) {}
                 Button("删除", role: .destructive) { let id = sheetID; ledger.edit { $0.deleteSheet(id: id) }; toast.show("已删除"); dismiss(); onDeleted?() }
             } message: { Text("这张表在所有月份里的账号都会一起删除，不能恢复。") }
-            .onAppear { if let s = ledger.sheet(sheetID) { name = s.str("name"); mode = s.str("mode"); syncGroups = (s["syncGroups"] as? Bool) != false; hidden = ledger.hiddenGroupIDs(s) } }
+            .onAppear { if let s = ledger.sheet(sheetID) { name = s.str("name"); mode = s.str("mode"); groupsEdit = ledger.sheetGroups(s).map { EditGroup(id: $0.id, name: $0.name, color: $0.color) } } }
         }
     }
 }
@@ -305,4 +312,15 @@ struct ShareSheet: UIViewControllerRepresentable {
     let url: URL
     func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: [url], applicationActivities: nil) }
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+struct EditGroup: Identifiable { let id: String; var name: String; var color: String }
+let groupPalette: [(String, String)] = [("#3b82f6", "蓝"), ("#22c55e", "绿"), ("#f97316", "橙"), ("#8b5cf6", "紫"), ("#ec4899", "粉"),
+                                        ("#14b8a6", "青"), ("#eab308", "黄"), ("#ef4444", "红"), ("#64748b", "灰"), ("#0ea5e9", "天蓝")]
+/// 底色上用白字还是深色字（和服务器 text_color_on 一样）
+func textOn(_ hex: String) -> String {
+    let h = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+    guard h.count == 6, let v = Int(h, radix: 16) else { return "#ffffff" }
+    let r = Double(v >> 16), g = Double((v >> 8) & 255), b = Double(v & 255)
+    return 0.299 * r + 0.587 * g + 0.114 * b > 160 ? "#1f2937" : "#ffffff"
 }

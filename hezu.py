@@ -23,7 +23,7 @@ import hezu_export
 import hezu_xlsx
 
 API_PREFIX = "/admin/hezu/api/"
-WEB_CLIENT_MIN = 3   # 网页 app.js 里的 CLIENT_VERSION；改了同步规则时调高，旧页面就存不进来
+WEB_CLIENT_MIN = 4   # 网页 app.js 里的 CLIENT_VERSION；改了同步规则时调高，旧页面就存不进来
 
 
 def _int(v):
@@ -50,7 +50,7 @@ _core = None   # app 模块，install() 时填入
 def default_state():
     return {
         "sheets": [
-            {"id": "ai", "name": "AI 合租", "mode": "members", "grouped": True},
+            {"id": "ai", "name": "AI 合租", "mode": "members", "grouped": True, "groups": []},
             {"id": "netflix", "name": "Netflix", "mode": "unit"},
             {"id": "spotify", "name": "Spotify", "mode": "unit"},
             {"id": "icloud", "name": "iCloud", "mode": "unit"},
@@ -114,6 +114,28 @@ def save_state(state, expected_rev):
         db.rollback()
         raise
     return current + 1
+
+
+def migrate_sheet_groups(state):
+    """分组表（AI 合租）改成有自己的一套分组：第一次时把它现在显示的验证码分组复制一份（id、名字、颜色、顺序照旧，
+    所以每一行的分组不用改），之后两边各管各的。被「只存账号」表认领的、在这张表隐藏了的不复制。
+    返回有没有改动。"""
+    sheets = state.get("sheets") or []
+    todo = [s for s in sheets if isinstance(s, dict) and s.get("grouped") and not isinstance(s.get("groups"), list)]
+    changed = False
+    for s in sheets:   # 以前的「分组同步」开关和「隐藏分组」不再需要
+        if isinstance(s, dict) and ("syncGroups" in s or "hideGroups" in s) and s not in todo:
+            s.pop("syncGroups", None); s.pop("hideGroups", None); changed = True
+    if not todo:
+        return changed
+    owned = {s.get("totpGroup") for s in sheets if isinstance(s, dict) and s.get("mode") == "accounts" and s.get("totpGroup")}
+    shared = context()["groups"]
+    for s in todo:
+        hidden = set(s.get("hideGroups") or [])
+        s["groups"] = [{"id": g["id"], "name": g["name"], "color": g["color"], "text": g["text"]}
+                       for g in shared if g["name"] not in owned and g["id"] not in hidden]
+        s.pop("syncGroups", None); s.pop("hideGroups", None)
+    return True
 
 
 def context():
@@ -400,7 +422,16 @@ def install(core):
     @api_limit
     @login_required
     def hezu_state_get():
-        return jsonify(payload(*load_state()))
+        rev, state = load_state()
+        if migrate_sheet_groups(state):
+            saved = save_state(state, rev)
+            if saved is None:          # 刚好别处在存：按库里最新的再来一次
+                rev, state = load_state()
+                if migrate_sheet_groups(state):
+                    rev = save_state(state, rev) or rev
+            else:
+                rev = saved
+        return jsonify(payload(rev, state))
 
     @app.route(API_PREFIX + "state", methods=["PUT"])
     @api_limit

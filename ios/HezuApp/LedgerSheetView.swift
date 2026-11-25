@@ -109,7 +109,7 @@ struct LedgerSheetView: View {
                         Button { markAllPaid() } label: { Label("本页全部标记已收", systemImage: "checkmark.circle") }
                     }
                     Divider()
-                    Button { sheetSettings = true } label: { Label(grouped ? "表设置（改名、分组同步、显示哪些分组）" : "表设置（改名、收费方式）", systemImage: "slider.horizontal.3") }
+                    Button { sheetSettings = true } label: { Label(grouped ? "表设置（改名、分组）" : "表设置（改名、收费方式）", systemImage: "slider.horizontal.3") }
                 } label: { Image(systemName: "ellipsis.circle") }
             }
         }
@@ -182,11 +182,11 @@ struct LedgerSheetView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 chip("全部 \(allRows.count)", nil, groupFilter == nil) { groupFilter = nil }
-                ForEach(ledger.visibleGroups(in: sheet)) { g in
+                ForEach(ledger.sheetGroups(sheet)) { g in
                     let n = allRows.filter { $0.str("group") == g.id }.count
                     chip(n > 0 ? "\(g.name) \(n)" : g.name, Color(hex: g.color), groupFilter == g.id) { groupFilter = groupFilter == g.id ? nil : g.id }
                 }
-                let shown = ledger.shownGroupIDs(in: sheet)
+                let shown = Set(ledger.sheetGroups(sheet).map(\.id))
                 let loose = allRows.filter { !shown.contains($0.str("group")) }.count
                 if loose > 0 { chip("未分组 \(loose)", .gray, groupFilter == "") { groupFilter = groupFilter == "" ? nil : "" } }
             }.padding(.horizontal, 16).padding(.vertical, 4)
@@ -216,12 +216,12 @@ struct LedgerSheetView: View {
         }
         guard grouped else { return list.isEmpty ? [] : [Sec(key: "all", title: sheet.str("name"), color: nil, groupID: nil, rows: list)] }
         var out: [Sec] = []
-        for g in ledger.visibleGroups(in: sheet) where groupFilter == nil || groupFilter == g.id {
+        for g in ledger.sheetGroups(sheet) where groupFilter == nil || groupFilter == g.id {
             let l = list.filter { $0.str("group") == g.id }
             if !l.isEmpty || groupFilter == g.id { out.append(Sec(key: g.id, title: g.name, color: Color(hex: g.color), groupID: g.id, rows: l)) }
         }
         if groupFilter == nil || groupFilter == "" {
-            let ids = ledger.shownGroupIDs(in: sheet)
+            let ids = Set(ledger.sheetGroups(sheet).map(\.id))
             let l = list.filter { !ids.contains($0.str("group")) }
             if !l.isEmpty { out.append(Sec(key: "loose", title: "未分组", color: .gray, groupID: "", rows: l)) }
         }
@@ -267,7 +267,7 @@ struct LedgerSheetView: View {
             Button { editing = RowRef(id: id, preset: "") } label: { Label("编辑", systemImage: "pencil") }
             if grouped {
                 Menu {
-                    ForEach(ledger.visibleGroups(in: sheet)) { g in Button(g.name) { move(r, to: g.id) } }
+                    ForEach(ledger.sheetGroups(sheet)) { g in Button(g.name) { move(r, to: g.id) } }
                     Button("未分组") { move(r, to: "") }
                 } label: { Label("移到分组", systemImage: "folder") }
             }
@@ -297,11 +297,7 @@ struct LedgerSheetView: View {
 
     private func move(_ r: JSON, to gid: String) {
         let id = r.str("id")
-        ledger.edit { $0.updateRow(month, sheetID, id) { $0["group"] = gid } }
-        if let a = ledger.totpAccount(r.int("totpId")), !ledger.isArchived(month) {
-            let name = ledger.group(gid)?.name ?? ""
-            Task { _ = try? await api.post("/admin/accounts/\(a.id)/field", ["field": "group_name", "value": name]); await codes.load() }
-        }
+        ledger.edit { $0.updateRow(month, sheetID, id) { $0["group"] = gid } }   // 只是这张表的分组，验证码那边不动
     }
 
     private func markAllPaid() {

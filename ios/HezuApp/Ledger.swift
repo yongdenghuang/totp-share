@@ -119,7 +119,6 @@ final class LedgerStore: ObservableObject {
     func issuer(_ id: String) -> JSON? { issuers.first { $0.str("id") == id } }
     func card(_ id: String) -> JSON? { cards.first { $0.str("id") == id } }
     func cards(of issuer: String) -> [JSON] { cards.filter { $0.str("issuerId") == issuer } }
-    func group(_ id: String) -> LGroup? { groups.first { $0.id == id } }
     func totpAccount(_ id: Int) -> LTotp? { id > 0 ? totp.first { $0.id == id } : nil }
 }
 
@@ -209,18 +208,24 @@ extension Dictionary where Key == String, Value == Any {
         let list = (self["totpSkip"] as? [Any])?.compactMap { ($0 as? Int) ?? ($0 as? NSNumber)?.intValue } ?? []
         self["totpSkip"] = list.filter { $0 != id }
     }
-    mutating func setHiddenGroups(id: String, hidden: [String]) {
+    /// 分组表（AI 合租）自己的分组整体换掉；删掉的分组里、进行中月份的账号放到未分组
+    mutating func setSheetGroups(id: String, groups: [JSON]) {
+        var gone = Set<String>()
         editList("sheets") { l in
             guard let i = l.firstIndex(where: { $0.str("id") == id }) else { return }
-            if hidden.isEmpty { l[i]["hideGroups"] = nil } else { l[i]["hideGroups"] = hidden }
+            let keep = Set(groups.map { $0.str("id") })
+            gone = Set(l[i].list("groups").map { $0.str("id") }).subtracting(keep)
+            l[i]["groups"] = groups
         }
-    }
-    /// 分组表的「分组和账号验证码同步」（默认开；关掉存成 syncGroups = false）
-    mutating func setSheetSync(id: String, on: Bool) {
-        editList("sheets") { l in
-            guard let i = l.firstIndex(where: { $0.str("id") == id }) else { return }
-            if on { l[i]["syncGroups"] = nil } else { l[i]["syncGroups"] = false }
+        guard !gone.isEmpty else { return }
+        var months = dict("months")
+        for (ym, mv) in months {
+            guard var M = mv as? JSON, !M.bool("archived") else { continue }
+            var rows = M.dict("rows")
+            rows[id] = rows.list(id).map { r in var r = r; if gone.contains(r.str("group")) { r["group"] = "" }; return r }
+            M["rows"] = rows; months[ym] = M
         }
+        self["months"] = months
     }
     mutating func skipTotp(_ id: Int) {
         var list = (self["totpSkip"] as? [Any])?.compactMap { ($0 as? Int) ?? ($0 as? NSNumber)?.intValue } ?? []
@@ -307,16 +312,9 @@ extension LedgerStore {
         }
         return t
     }
-    /// 被「只存账号」表认领的验证码分组：不再在 AI 合租里显示
-    var visibleGroups: [LGroup] {
-        let own = Set(sheets.filter { $0.str("mode") == "accounts" }.map { $0.str("totpGroup") }.filter { !$0.isEmpty })
-        return groups.filter { !own.contains($0.name) }
-    }
-    /// 分组表自己隐藏的分组（sheet.hideGroups）：只是这张表不显示，验证码那边不动
-    func hiddenGroupIDs(_ sheet: JSON) -> Set<String> { Set((sheet["hideGroups"] as? [Any] ?? []).compactMap { $0 as? String }) }
-    func visibleGroups(in sheet: JSON) -> [LGroup] { let h = hiddenGroupIDs(sheet); return visibleGroups.filter { !h.contains($0.id) } }
-    /// 算「未分组」用：没在这张表隐藏的分组
-    func shownGroupIDs(in sheet: JSON) -> Set<String> { let h = hiddenGroupIDs(sheet); return Set(groups.map(\.id).filter { !h.contains($0) }) }
+    /// 分组表（AI 合租）自己的分组（sheet.groups），和账号验证码的分组互不影响
+    func sheetGroups(_ sheet: JSON) -> [LGroup] { sheet.list("groups").map { LGroup(id: $0.str("id"), name: $0.str("name"), color: $0.str("color")) } }
+    func sheetGroup(_ sheet: JSON, _ id: String) -> LGroup? { sheetGroups(sheet).first { $0.id == id } }
     var sheetInfo: [SheetInfo] {
         sheets.map { SheetInfo(id: $0.str("id"), name: $0.str("name"), mode: $0.str("mode"), grouped: $0.bool("grouped"), rows: rows(latestMonth, $0.str("id")).count) }
     }
@@ -328,7 +326,7 @@ extension LedgerStore {
             let sid = sh.str("id")
             for r in rows(ym, sid) where !r.bool("stopped") {
                 guard let d = daysUntil(r.str("renew")), d <= 7 else { continue }
-                let label = sh.bool("grouped") ? (group(r.str("group"))?.name ?? sh.str("name")) : sh.str("name")
+                let label = sh.bool("grouped") ? (sheetGroup(sh, r.str("group"))?.name ?? sh.str("name")) : sh.str("name")
                 out.append(DueItem(id: r.str("id"), days: d, title: r.str("account").isEmpty ? "未填账号" : r.str("account"), meta: label, route: .sheet(sid)))
             }
         }

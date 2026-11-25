@@ -31,7 +31,7 @@
   };
 
   let S = null;                       // 账本数据（加密存在服务器上）
-  let G = [];                         // 分组：和验证码账号共用一套，以验证码后台为准
+  let G = [];                         // 账号验证码的分组（新建验证码账号、「只存账号」表认领时用）；AI 合租的分组在 sheet.groups 里
   let A = [];                         // 验证码账号名单（不含密钥和密码）
   let VC = { items: 0, notes: 0 };    // 密码本、备忘录的条数（导航上显示）
   let NAV = { sections: ['accounts', 'backend', 'backup', 'totp'], items: {} };   // 左侧导航的顺序（服务器上存着）
@@ -233,23 +233,22 @@
     if (syncFromTotp()) changed = true;
     if (changed) touch();
   }
-  // 验证码账号里登记了、这个月账本里还没有的账号，自动在 AI 合租里补一行：账号和分组照搬，收费成本自己填。
-  // 手动删掉或取消关联过的记在 totpSkip 里，不会被自动补回来（「更多 → 重新同步验证码账号」可以全部找回）。
+  // 「只存账号」表认领了某个验证码分组时：这个分组里、这个月还没记上的验证码账号，自动在那张表补一行。
+  // AI 合租这类分组表有自己的一套分组，验证码里新加的账号不会自动加进去（要用就点「添加账号」从验证码里选）。
+  // 手动删掉或取消关联过的记在 totpSkip 里，不会被自动补回来。
   function syncFromTotp() {
     const ids = new Set(A.map(a => a.id));
     const before = (S.totpSkip || []).length;
     S.totpSkip = (S.totpSkip || []).filter((id, i, arr) => ids.has(id) && arr.indexOf(id) === i);
     let n = S.totpSkip.length !== before ? 1 : 0;
     const ym = latestMonth(), M = S.months[ym];
-    const sheet = S.sheets.find(s => s.grouped) || S.sheets.find(s => s.mode === 'members');
-    if (!M || M.archived || !sheet) return n > 0;
+    if (!M || M.archived) return n > 0;
     const skip = new Set(S.totpSkip), have = new Set();
     for (const sh of S.sheets) for (const r of M.rows[sh.id]) if (r.totpId > 0) have.add(r.totpId);
     for (const a of A) if (!have.has(a.id) && !skip.has(a.id)) {
-      const own = sheetForGroup(a.group);   // 这个分组归「只存账号」表的，加到那张表里
-      if (own) M.rows[own.id].push(fixRow({ account: a.name, totpId: a.id }));
-      else if (groupSync(sheet) && !hiddenIn(sheet, groupIdByName(a.group))) M.rows[sheet.id].push(fixRow({ account: a.name, group: groupIdByName(a.group), totpId: a.id }));
-      else continue;
+      const own = sheetForGroup(a.group);
+      if (!own) continue;
+      M.rows[own.id].push(fixRow({ account: a.name, totpId: a.id }));
       n++;
     }
     return n > 0;
@@ -259,42 +258,27 @@
     if (on) list.push(id);
     S.totpSkip = list;
   }
-  // 账号和某个验证码账号同名（且只有一个）时自动关联。totpId: 0 = 没关联，-1 = 手动取消过，不再自动关联
+  // 关联的验证码账号被删了：解除关联。按名字自动关联只在「只存账号」表做（那里的账号就是那个验证码分组的）；
+  // 其他表要关联请手动选。totpId: 0 = 没关联，-1 = 手动的 / 取消过，不再自动关联
   function linkTotp() {
     const byName = {}; let n = 0;
     A.forEach(a => { const k = normName(a.name); (byName[k] = byName[k] || []).push(a); });
     for (const ym in S.months) for (const sh of S.sheets) for (const r of S.months[ym].rows[sh.id]) {
       if (r.totpId > 0 && !totpById(r.totpId)) { r.totpId = 0; n++; }
-      if (!r.totpId && r.account) { const m = byName[normName(r.account)]; if (m && m.length === 1 && groupFits(r, sh, m[0])) { r.totpId = m[0].id; n++; onLinked(r, sh, ym); } }
+      if (!r.totpId && r.account && sh.mode === 'accounts' && sh.totpGroup) {
+        const m = (byName[normName(r.account)] || []).filter(a => a.group === sh.totpGroup);
+        if (m.length === 1) { r.totpId = m[0].id; n++; onLinked(r, sh, ym); }
+      }
     }
-    if (pullGroups()) n++;
+    if (pullNames()) n++;
     return n > 0;
   }
-  // 自动关联（按名字）只在「这个账号就该在这里」时做，不然同一个邮箱在别处是另一个账号（比如用 Google 账号注册的 Claude）：
-  // - 只存账号表：验证码账号得在这张表认领的分组里
-  // - 分组表（AI 合租）：分组得对得上；归「只存账号」表的分组不算
-  // - Netflix 这类普通表：不自动关联，要关联请手动点「关联验证码」
-  function groupFits(r, sh, a) {
-    if (sh.mode === 'accounts') return !sh.totpGroup || a.group === sh.totpGroup;
-    if (!sh.grouped) return false;
-    if (sheetForGroup(a.group)) return false;
-    if (!a.group || !r.group || !G.some(g => g.id === r.group)) return true;
-    return groupIdByName(a.group) === r.group;
-  }
-  // ---------- 分组两边保持一致 ----------
-  // 关联了验证码账号的行，分组以验证码账号为准；只动进行中的月份，存档保持当时的样子。
-  const groupIdByName = name => { const g = G.find(x => x.name === name); return g ? g.id : ''; };
-  // 分组表的「分组和验证码账号同步」：默认开；关掉后两边各管各的分组，验证码新加的账号也不再自动出现在这张表里
-  const groupSync = sh => !!sh && !!sh.grouped && sh.syncGroups !== false;
-  // 关联了验证码账号的行：账号名和分组都以验证码账号为准（存档月份保持当时的样子）
-  function pullGroups() {
+  // 关联了验证码账号的行：账号名以验证码账号为准（存档月份保持当时的样子）。分组两边各管各的，不同步。
+  function pullNames() {
     let n = 0;
     for (const ym in S.months) if (!S.months[ym].archived) for (const sh of S.sheets) for (const r of S.months[ym].rows[sh.id] || []) {
-      const a = r.totpId > 0 ? totpById(r.totpId) : null; if (!a) continue;
-      if (a.name && r.account !== a.name) { r.account = a.name; n++; }
-      if (!groupSync(sh)) continue;
-      const gid = groupIdByName(a.group);
-      if (r.group !== gid) { r.group = gid; n++; }
+      const a = r.totpId > 0 ? totpById(r.totpId) : null;
+      if (a && a.name && r.account !== a.name) { r.account = a.name; n++; }
     }
     return n > 0;
   }
@@ -303,32 +287,20 @@
     const a = row.totpId > 0 ? totpById(row.totpId) : null;
     const name = String(row.account || '').trim();
     if (!a || !name || name === a.name) return;
-    a.name = name; pullGroups(); touch(); render();
+    a.name = name; pullNames(); touch(); render();
     api('POST', '/admin/accounts/' + a.id + '/field', { field: 'name', value: name })
       .then(r => { if (!r.ok) setStatus('验证码账号的名称没改成，请刷新页面', true); }).catch(() => setStatus('验证码账号的名称没改成，请刷新页面', true));
   }
-  // 把验证码账号那边的分组改成 groupId 对应的分组（'' = 未分组）。先改本地再发请求，失败了下次打开会以服务器为准。
-  function pushGroup(totpId, groupId) {
-    const a = totpById(totpId), g = G.find(x => x.id === groupId); if (!a) return;
-    a.group = g ? g.name : '';
-    api('POST', '/admin/accounts/' + totpId + '/field', { field: 'group_name', value: a.group })
-      .then(r => { if (!r.ok) setStatus('验证码账号的分组没改成，请刷新页面', true); }).catch(() => setStatus('验证码账号的分组没改成，请刷新页面', true));
-  }
-  // 刚关联上的那一刻：验证码账号有分组就跟它走；它没分组而这一行有，就把这一行的分组带过去
+  // 刚关联上的那一刻：这一行填过密码而验证码账号还没有，就把密码存过去
   function onLinked(row, sheet, ym) {
     const a = totpById(row.totpId);
-    if (!a || !sheet.grouped || S.months[ym].archived) return;
-    if (groupSync(sheet) && !a.group && row.group && G.some(g => g.id === row.group)) pushGroup(a.id, row.group);
+    if (!a || S.months[ym].archived) return;
     if (row.password && !a.hasPassword) {
       const pw = row.password;
       api('POST', '/admin/accounts/' + a.id + '/password', { password: pw }).then(r => { if (r.ok) { a.hasPassword = true; if (row.password === pw) { row.password = ''; touch(); } } });
     }
   }
-  function moveRow(row, groupId) {
-    row.group = groupId;
-    if (row.totpId > 0 && totpById(row.totpId) && !S.months[view.month].archived && groupSync(S.sheets.find(x => x.id === view.tab))) { pushGroup(row.totpId, groupId); pullGroups(); }
-    touch(); render();
-  }
+  function moveRow(row, groupId) { row.group = groupId; touch(); render(); }
   function newVps() { return { id: uid(), host: '', site: '', ip: '', port: '', password: '', tags: [], traffic: '', renew: '', price: '', email: '', loginPassword: '' }; }
   const VPS_DUE_DAYS = 30;   // 一个月内要续费的 VPS 整行标黄
   function splitTags(t) { return String(t || '').split(/[，,、/;；|\n]+/).map(x => x.trim()).filter((x, i, a) => x && a.indexOf(x) === i); }
@@ -340,14 +312,20 @@
   function rowCost(sheet, r) { return sheet.mode === 'accounts' ? 0 : sheet.mode === 'resale' ? num(r.unitCost) * num(r.count) : num(r.cost); }
   function income(sheet, r) { return sheet.mode === 'accounts' ? 0 : sheet.mode === 'members' ? r.members.reduce((a, m) => a + num(m.amount), 0) : num(r.unitPrice) * num(r.count); }
   function heads(sheet, r) { return sheet.mode === 'accounts' ? 0 : sheet.mode === 'members' ? r.members.length : num(r.count); }
-  // 「只存账号」表可以认领一个验证码分组（totpGroup）：这个分组的账号归它，不再出现在 AI 合租里
-  const ownedGroupNames = () => new Set(S.sheets.filter(x => x.mode === 'accounts' && x.totpGroup).map(x => x.totpGroup));
-  // 分组表可以在自己这里隐藏某些分组（sheet.hideGroups = [分组 id]）：只是这张表不显示，账号验证码里的分组和账号都不动
-  const hiddenIn = (sh, id) => !!sh && Array.isArray(sh.hideGroups) && sh.hideGroups.includes(id);
-  const visibleGroups = sh => { const own = ownedGroupNames(); return G.filter(g => !own.has(g.name) && !hiddenIn(sh, g.id)); };
-  // 算「未分组」时用：分组还在、也没在这张表隐藏的（被「只存账号」表认领的照旧不算未分组）
-  const shownIds = sh => new Set(G.filter(g => !hiddenIn(sh, g.id)).map(g => g.id));
+  // 「只存账号」表可以认领一个验证码分组（totpGroup）：这个分组的验证码账号自动记到这张表
   const sheetForGroup = name => S.sheets.find(x => x.mode === 'accounts' && x.totpGroup && x.totpGroup === name) || null;
+  // 分组表（AI 合租）自己的分组：sheet.groups = [{ id, name, color, text }]，和账号验证码的分组互不影响
+  const sheetGroups = sh => (sh && Array.isArray(sh.groups)) ? sh.groups : [];
+  const visibleGroups = sh => sheetGroups(sh);
+  const shownIds = sh => new Set(sheetGroups(sh).map(g => g.id));
+  const groupOf = (sh, id) => sheetGroups(sh).find(g => g.id === id) || null;
+  // 底色上用白字还是深色字（和服务器 text_color_on 一样）
+  function textOn(bg) {
+    const m = /^#([0-9a-f]{6})$/i.exec(bg || ''); if (!m) return '#ffffff';
+    const v = parseInt(m[1], 16), r = v >> 16, g = (v >> 8) & 255, b = v & 255;
+    return 0.299 * r + 0.587 * g + 0.114 * b > 160 ? '#1f2937' : '#ffffff';
+  }
+  const GROUP_COLORS = ['#3b82f6', '#22c55e', '#f97316', '#8b5cf6', '#ec4899', '#14b8a6', '#eab308', '#ef4444', '#64748b', '#0ea5e9'];
   const zero = () => ({ n: 0, heads: 0, income: 0, cost: 0, profit: 0 });
   function stats(sheet, rows) {
     const s = zero();
@@ -499,7 +477,7 @@
   window.addEventListener('focus', checkFresh);
 
   // 网页版本号：服务器拒收旧页面的保存，免得开着没刷新的旧页面按旧规则把账本改回去
-  const CLIENT_VERSION = 3;
+  const CLIENT_VERSION = 4;
   let conflicts = 0;
   async function save() {
     if (saving || !dirty) return;
@@ -620,7 +598,7 @@
     const draw = () => {
       const k = q.value.trim().toLowerCase();
       const items = A.filter(a => !k || (a.name + ' ' + a.group).toLowerCase().includes(k)).slice(0, 50);
-      setKids(list, items.map(a => h('button', { class: 'item', type: 'button', onclick: () => { row.totpId = a.id; skipTotp(a.id, false); closePop(); const sh = S.sheets.find(x => x.id === view.tab); if (sh) onLinked(row, sh, view.month); pullGroups(); touch(); render(); } },
+      setKids(list, items.map(a => h('button', { class: 'item', type: 'button', onclick: () => { row.totpId = a.id; skipTotp(a.id, false); closePop(); const sh = S.sheets.find(x => x.id === view.tab); if (sh) onLinked(row, sh, view.month); pullNames(); touch(); render(); } },
         a.name, a.group ? h('span', { class: 'faint', text: '  ' + a.group }) : null)), items.length ? null : h('div', { class: 'label', text: '没有匹配的验证码账号' }));
     };
     q.addEventListener('input', draw); draw();
@@ -1039,8 +1017,8 @@
     const items = [];
     if (sheet.grouped) {
       items.push({ label: '移动到分组' });
-      G.filter(g => g.id !== row.group).forEach(g => items.push({ text: g.name, run: () => moveRow(row, g.id) }));
-      if (G.some(g => g.id === row.group)) items.push({ text: '未分组', run: () => moveRow(row, '') });
+      sheetGroups(sheet).filter(g => g.id !== row.group).forEach(g => items.push({ text: g.name, run: () => moveRow(row, g.id) }));
+      if (groupOf(sheet, row.group)) items.push({ text: '未分组', run: () => moveRow(row, '') });
       items.push('-');
     }
     if (row.totpId > 0 && totpById(row.totpId)) {
@@ -1238,7 +1216,7 @@
       const ids = shownIds(sheet), f = view.gfilter;
       visibleGroups(sheet).forEach(g => { if (f === null || f === g.id) out.push(section(sheet, rows, g, r => r.group === g.id, editable, live)); });
       if ((f === null || f === '__loose') && rows.some(r => !ids.has(r.group))) out.push(section(sheet, rows, LOOSE, r => !ids.has(r.group), editable, live));
-      if (!G.length) out.push(h('div', { class: 'empty', text: '还没有分组，点上面的“管理分组”新建。' }));
+      if (!sheetGroups(sheet).length) out.push(h('div', { class: 'empty', text: '还没有分组，点上面的“管理分组”新建。' }));
     } else out.push(section(sheet, rows, null, () => true, editable, live));
     return out;
   }
@@ -1271,10 +1249,10 @@
     return { name, list, chosen, picked: () => picked, onChange: f => { changed = f; } };
   }
   // 「同时添加到账号验证码」：要填 TOTP 密钥（验证码账号就是存两步验证的）
-  function syncPart(groupChoice) {
+  function syncPart(groupChoice, defName) {
     const box = h('input', { type: 'checkbox' });
     const secret = h('input', { type: 'text', placeholder: '网站「两步验证」给的密钥（Base32）', autocomplete: 'off', spellcheck: false });
-    const grp = groupChoice ? h('select', null, h('option', { value: '', text: '未分组' }), G.map(g => h('option', { value: g.name, text: g.name }))) : null;
+    const grp = groupChoice ? h('select', null, h('option', { value: '', text: '未分组' }), G.map(g => h('option', { value: g.name, text: g.name, selected: g.name === defName }))) : null;
     const fields = h('div', { class: 'form sync-fields', hidden: true },
       h('label', { class: 'field' }, 'TOTP 密钥', secret), grp ? h('label', { class: 'field' }, '验证码分组', grp) : null);
     const row = h('label', { class: 'check' }, box, '同时添加到账号验证码');
@@ -1304,35 +1282,30 @@
     const groupSel = h('select', null, h('option', { value: '', text: '未分组' }), visibleGroups(sheet).map(g => h('option', { value: g.id, text: g.name, selected: !!preset.group && g.id === preset.group.id })));
     const password = h('input', { type: 'text', placeholder: '可不填；加密保存', autocomplete: 'off', spellcheck: false });
     const fPw = h('label', { class: 'field' }, '账号登录密码', password);
-    const sp = syncPart(sheet.mode === 'accounts' && !owned);
+    // 新建验证码账号时放进哪个验证码分组（和这张表的分组无关）；默认挑同名的
+    const sp = syncPart(!owned, preset.group ? preset.group.name : '');
     const hint = h('div', { class: 'muted small' });
     const err = h('div', { class: 'neg' });
-    const refresh = () => {
-      const a = ac.picked(), g = G.find(x => x.id === groupSel.value);
-      sp.show(!a); fPw.hidden = !!a;
-      hint.textContent = a && sheet.grouped && groupSync(sheet) && g && a.group !== g.name
-        ? '分组同步开着：验证码账号那边的分组会跟着改成「' + g.name + '」。不想同步可以在「表设置」里关掉。' : '';
-    };
+    const refresh = () => { const a = ac.picked(); sp.show(!a); fPw.hidden = !!a; };
     ac.onChange(refresh); groupSel.addEventListener('change', refresh); refresh();
     let made = null;
     const submit = async () => {
       err.textContent = '';
-      const n = ac.name.value.trim(), a = ac.picked(), g = G.find(x => x.id === groupSel.value), pw = password.value.trim();
+      const n = ac.name.value.trim(), a = ac.picked(), g = groupOf(sheet, groupSel.value), pw = password.value.trim();
       if (!n) { ac.name.focus(); return false; }
       let totpId = -1;
       if (a) {
         totpId = a.id; skipTotp(a.id, false);
-        if (sheet.grouped && groupSync(sheet) && g && a.group !== g.name) pushGroup(a.id, g.id);
       } else if (sp.on()) {
         const sec = sp.secret.value.trim();
         if (!sec) { err.textContent = '同时添加到账号验证码需要填 TOTP 密钥；没有两步验证的账号就别勾这个。'; sp.secret.focus(); return false; }
-        totpId = await createTotp({ name: n, secret: sec, password: pw, group: owned || (sp.grp ? sp.grp.value : (g ? g.name : '')) }, err);
+        totpId = await createTotp({ name: n, secret: sec, password: pw, group: owned || (sp.grp ? sp.grp.value : '') }, err);
         if (!totpId) return false;
       }
       made = fixRow({ account: n, group: sheet.grouped && g ? g.id : '', totpId, password: totpId > 0 ? '' : pw });
       S.months[view.month].rows[sheet.id].push(made);
       view.tab = sheet.id; view.q = '';
-      pullGroups(); touch();
+      pullNames(); touch();
     };
     const ok = await dialog('添加账号到 ' + sheet.name, [
       h('label', { class: 'field' }, '账号', ac.name), ac.chosen, ac.list,
@@ -1356,16 +1329,16 @@
     const chip = (label, val, n, g) => {
       const b = h('button', { class: 'fchip' + (view.gfilter === val ? ' on' : ''), type: 'button', onclick: () => { view.gfilter = val; render(); } },
         g ? h('span', { class: 'gdot', style: 'background:' + g.color }) : null, label + ' ' + n);
-      if (g) dragChip(b, g);
+      if (g) dragChip(b, g, sheet);
       return b;
     };
     box.append(chip('全部', null, rows.length));
     visibleGroups(sheet).forEach(g => box.append(chip(g.name, g.id, counts[g.id] || 0, g)));
     if (loose) box.append(chip('未分组', '__loose', loose));
-    box.append(h('button', { class: 'btn ghost small', type: 'button', text: G.length ? '管理分组' : '＋ 新建分组', onclick: e => groupsMenu(e.currentTarget, sheet) }));
+    box.append(h('button', { class: 'btn ghost small', type: 'button', text: sheetGroups(sheet).length ? '管理分组' : '＋ 新建分组', onclick: e => groupsMenu(e.currentTarget, sheet) }));
     return box;
   }
-  function dragChip(b, g) {
+  function dragChip(b, g, sheet) {
     b.draggable = true;
     b.title = '点一下筛选，拖动可以调整分组顺序';
     const clear = () => document.querySelectorAll('.gchips .drop-before, .gchips .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
@@ -1382,21 +1355,14 @@
       e.preventDefault();
       const after = b.classList.contains('drop-after'), from = dragGroup;
       clear();
-      if (from && from !== g.id) moveGroup(from, g.id, after);
+      if (from && from !== g.id) moveGroup(sheet, from, g.id, after);
     });
   }
-  async function moveGroup(fromId, toId, after) {
-    const list = G.filter(x => x.id !== fromId), moved = G.find(x => x.id === fromId);
+  function moveGroup(sheet, fromId, toId, after) {
+    const all = sheetGroups(sheet), list = all.filter(x => x.id !== fromId), moved = all.find(x => x.id === fromId);
+    if (!moved) return;
     list.splice(list.findIndex(x => x.id === toId) + (after ? 1 : 0), 0, moved);
-    G = list; render();
-    try {
-      const r = await api('POST', '/admin/groups/reorder', { order: list.map(x => x.name) });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      setStatus('分组顺序已保存');
-    } catch (e) {
-      setStatus('分组顺序没保存上', true);
-      await refreshContext(); render();
-    }
+    sheet.groups = list; touch(); render(); setStatus('分组顺序已保存');
   }
 
   // Netflix / Spotify / iCloud 这类普通表：只填这张表自己的列，续费卡和收费在表格里接着填
@@ -1437,7 +1403,7 @@
     } }]);
     if (!ok || !made) return;
     S.months[view.month].rows[sheet.id].push(made);
-    pullGroups(); touch(); render(); pollCodes();
+    pullNames(); touch(); render(); pollCodes();
     const inp = document.querySelector('[data-row="' + made.id + '"] input'); if (inp) inp.scrollIntoView({ block: 'center' });
   }
 
@@ -1464,44 +1430,57 @@
   }
 
   // ---------- 分组 / 表 管理 ----------
-  // 分组和验证码账号共用一套：这里只能新建，改名、换颜色、删除去验证码后台的分组管理页
-  async function createGroup(name) {
-    const r = await api('POST', '/groups', { name }), d = await r.json().catch(() => ({}));
-    if (!r.ok || !d.ok) { await alertBox(d.error || '新建分组失败'); return null; }
-    useContext(d);
-    return G.find(g => g.name === d.name) || null;
+  // 分组表（AI 合租）的分组是它自己的：新建、改名、换颜色、排序、删除都只影响这张表，不动账号验证码的分组
+  function createGroup(sheet, name, color) {
+    name = String(name || '').trim().slice(0, 40);
+    if (!name) return null;
+    const list = sheetGroups(sheet), same = list.find(g => normName(g.name) === normName(name));
+    if (same) return same;
+    color = color || GROUP_COLORS[list.length % GROUP_COLORS.length];
+    const g = { id: 'g_' + uid(), name, color, text: textOn(color) };
+    sheet.groups = list.concat([g]);
+    touch();
+    return g;
   }
-  async function newGroupDialog() {
+  async function newGroupDialog(sheet) {
     const name = h('input', { type: 'text', placeholder: '如 GPT Plus' });
-    const ok = await dialog('新建分组', [h('label', { class: 'field' }, '分组名称', name), h('div', { class: 'muted', text: '分组和验证码账号共用一套，新建后两边都能用。' })],
+    const ok = await dialog('新建分组', [h('label', { class: 'field' }, '分组名称', name), h('div', { class: 'muted', text: '只是「' + sheet.name + '」里的分组，账号验证码的分组不受影响。' })],
       [{ text: '取消' }, { text: '新建', cls: 'primary', value: true, run: () => { if (!name.value.trim()) { name.focus(); return false; } } }]);
-    return ok ? createGroup(name.value.trim()) : null;
+    return ok ? createGroup(sheet, name.value) : null;
   }
   function groupsMenu(btn, sheet) {
     menu(btn, [
-      { text: '新建分组…', run: async () => { if (await newGroupDialog()) render(); } },
-      sheet ? { text: '这张表显示哪些分组…', run: () => groupsShownDialog(sheet) } : null,
-      { text: '改名、换颜色、删除分组（账号验证码也会跟着变）…', run: () => leave('/admin/groups') },
-    ].filter(Boolean));
+      { text: '新建分组…', run: () => newGroupDialog(sheet).then(g => { if (g) render(); }) },
+      { text: '改名、换颜色、删除分组…', run: () => manageGroupsDialog(sheet) },
+    ]);
   }
-  // 只在这张表里隐藏 / 显示分组，不动账号验证码
-  async function groupsShownDialog(sheet) {
-    const own = ownedGroupNames(), M = S.months[view.month], rows = M ? (M.rows[sheet.id] || []) : [];
-    const list = G.filter(g => !own.has(g.name));
-    const boxes = list.map(g => {
-      const n = rows.filter(r => r.group === g.id).length;
-      const cb = h('input', { type: 'checkbox', checked: !hiddenIn(sheet, g.id) });
-      return { g, cb, el: h('label', { class: 'check' }, cb, h('span', { class: 'gdot', style: 'background:' + g.color }), g.name, h('span', { class: 'faint small', text: n ? '  这个月 ' + n + ' 个账号' : '' })) };
-    });
-    const ok = await dialog(sheet.name + ' 显示哪些分组', [
-      h('div', { class: 'form' }, boxes.map(b => b.el)),
-      h('div', { class: 'muted small', text: '去掉勾只是这张表里不显示这个分组：账号验证码里的分组和账号都不会动，也不会删。这个分组里已经记在这张表的账号会放到「未分组」；验证码里这个分组新加的账号也不会再自动加进这张表。' }),
-    ], [{ text: '取消' }, { text: '保存', cls: 'primary', value: true }]);
+  // 一次改好这张表的全部分组：名字、颜色、删除（顺序在分组条上拖）
+  async function manageGroupsDialog(sheet) {
+    const M = S.months[view.month], rows = M ? (M.rows[sheet.id] || []) : [];
+    const items = sheetGroups(sheet).map(g => ({ g, name: h('input', { type: 'text', value: g.name, maxLength: 40 }), color: h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(g.color) ? g.color : '#64748b' }), del: false }));
+    const list = h('div', { class: 'grp-edit' });
+    const draw = () => setKids(list, items.length ? items.map(it => {
+      const n = rows.filter(r => r.group === it.g.id).length;
+      return h('div', { class: 'grp-row' + (it.del ? ' del' : '') }, it.color, it.name,
+        h('span', { class: 'faint small', text: n ? n + ' 个账号' : '' }),
+        h('button', { class: 'btn ghost xs', type: 'button', text: it.del ? '撤销' : '删除', onclick: () => { it.del = !it.del; draw(); } }));
+    }) : h('div', { class: 'muted', text: '还没有分组。' }));
+    draw();
+    const err = h('div', { class: 'neg' });
+    const ok = await dialog(sheet.name + ' 的分组', [list,
+      h('div', { class: 'muted small', text: '只改「' + sheet.name + '」自己的分组，账号验证码的分组和账号都不动。删掉的分组里的账号会放到「未分组」，账号不会删。顺序在分组条上直接拖。' }), err],
+      [{ text: '取消' }, { text: '保存', cls: 'primary', value: true, run: () => {
+        const keep = items.filter(it => !it.del), names = keep.map(it => normName(it.name.value));
+        if (names.some(n => !n)) { err.textContent = '分组名称不能是空的。'; return false; }
+        if (new Set(names).size !== names.length) { err.textContent = '有两个分组同名了。'; return false; }
+      } }]);
     if (!ok) return;
-    const hide = boxes.filter(b => !b.cb.checked).map(b => b.g.id);
-    if (hide.length) sheet.hideGroups = hide; else delete sheet.hideGroups;
-    if (view.gfilter && hide.includes(view.gfilter)) view.gfilter = null;
-    touch(); render(); setStatus('已保存分组显示');
+    const gone = new Set(items.filter(it => it.del).map(it => it.g.id));
+    sheet.groups = items.filter(it => !it.del).map(it => ({ id: it.g.id, name: it.name.value.trim(), color: it.color.value, text: textOn(it.color.value) }));
+    // 进行中的月份：删掉的分组里的账号放到未分组（存档月份保持原样，显示时自然算未分组）
+    for (const ym in S.months) if (!S.months[ym].archived) for (const r of S.months[ym].rows[sheet.id] || []) if (gone.has(r.group)) r.group = '';
+    if (gone.has(view.gfilter)) view.gfilter = null;
+    touch(); render(); setStatus('分组已保存');
   }
   async function sheetForm(sheet) {
     const name = h('input', { type: 'text', value: sheet ? sheet.name : '', placeholder: '如 YouTube' });
@@ -1513,16 +1492,12 @@
     const grp = h('select', null, h('option', { value: '', text: '不认领' }), G.map(g => h('option', { value: g.name, text: g.name, selected: !!sheet && sheet.totpGroup === g.name })));
     const fGrp = h('label', { class: 'field', hidden: mode.value !== 'accounts' }, '这个验证码分组的账号放到这张表', grp);
     mode.addEventListener('change', () => { fGrp.hidden = mode.value !== 'accounts'; });
-    const sync = h('input', { type: 'checkbox', checked: groupSync(sheet) });
-    const fSync = sheet && sheet.grouped ? h('div', null, h('label', { class: 'check' }, sync, '分组和账号验证码保持同步'),
-      h('div', { class: 'muted small', text: '开着：两边的分组一起变，验证码里新加的账号会自动出现在这张表。关掉：这张表的分组自己管（比如用 Google 账号注册的 Claude 可以放在 Claude 分组，同时关联 Google 的验证码），也不会自动加账号。' })) : null;
-    const ok = await dialog(sheet ? '修改表' : '新建表', [h('label', { class: 'field' }, '名称', name), h('label', { class: 'field' }, '收费方式', mode), fGrp, fSync],
+    const ok = await dialog(sheet ? '修改表' : '新建表', [h('label', { class: 'field' }, '名称', name), h('label', { class: 'field' }, '收费方式', mode), fGrp],
       [{ text: '取消' }, { text: sheet ? '保存' : '新建', cls: 'primary', value: true, run: () => { if (!name.value.trim()) { name.focus(); return false; } } }]);
     if (!ok) return;
     if (sheet) { convertSheetMode(sheet, mode.value); sheet.name = name.value.trim(); sheet.mode = mode.value; }
     else { sheet = { id: 's_' + uid(), name: name.value.trim(), mode: mode.value }; S.sheets.push(sheet); view.tab = sheet.id; }
     if (mode.value === 'accounts' && grp.value) sheet.totpGroup = grp.value; else delete sheet.totpGroup;
-    if (fSync) { if (sync.checked) delete sheet.syncGroups; else sheet.syncGroups = false; }
     normalize(); touch(); render();
   }
   // 换收费方式时把还在进行的月份的数据换算过去（存档月份保持原样）
@@ -1543,7 +1518,7 @@
   }
   function sheetMenu(btn, sheet) {
     menu(btn, [
-      { text: sheet.grouped ? '改名 / 收费方式 / 分组同步' : '改名 / 改收费方式', run: () => sheetForm(sheet) },
+      { text: '改名 / 改收费方式', run: () => sheetForm(sheet) },
       { text: '删除这张表', danger: true, run: async () => {
         if (await confirmBox('删除表', '删除 “' + sheet.name + '” 这张表？\n它在所有月份里的账号都会一起删除，不能恢复。', '删除', true)) {
           S.sheets.splice(S.sheets.indexOf(sheet), 1);
@@ -1565,7 +1540,7 @@
     const out = [];
     for (const sh of S.sheets) for (const r of S.months[view.month].rows[sh.id] || []) {
       if (filter.cardId ? r.cardId !== filter.cardId : r.issuerId !== filter.issuerId) continue;
-      const g = sh.grouped ? G.find(x => x.id === r.group) : null;
+      const g = sh.grouped ? groupOf(sh, r.group) : null;
       out.push({ sheet: sh, row: r, where: sh.grouped ? sh.name + ' · ' + (g ? g.name : '未分组') : sh.name, color: g ? g.color : null, cost: rowCost(sh, r) });
     }
     return out;
@@ -1662,7 +1637,7 @@
   const SHEET_TINTS = ['#7c3aed', '#dc2626', '#4f46e5', '#c026d3', '#0891b2', '#65a30d', '#d97706', '#e11d48', '#0f766e', '#475569'];
   function rowTint(sheet, r) {
     if (r.stopped) return '#8891a5';
-    const g = sheet.grouped ? G.find(x => x.id === r.group) : null;
+    const g = sheet.grouped ? groupOf(sheet, r.group) : null;
     if (g) return g.color;
     if (sheet.grouped) return LOOSE.color;
     return SHEET_TINTS[Math.max(0, S.sheets.indexOf(sheet)) % SHEET_TINTS.length];
@@ -1973,7 +1948,7 @@
     const items = [];
     for (const sh of S.sheets) for (const r of S.months[view.month].rows[sh.id]) {
       const d = daysUntil(r.renew); if (r.stopped || d == null || d > 7) continue;
-      const g = sh.grouped ? G.find(x => x.id === r.group) : null, it = issuerById(r.issuerId), c = cardById(r.cardId);
+      const g = sh.grouped ? groupOf(sh, r.group) : null, it = issuerById(r.issuerId), c = cardById(r.cardId);
       items.push({ d, title: r.account || '未填账号', meta: [g ? g.name : sh.name, it ? it.name : '', c ? cardLabel(c) : ''].filter(Boolean).join(' · '), cost: money(r.cost),
         action: h('button', { class: 'btn small', type: 'button', text: '已续费', title: '续费日期顺延一个月', onclick: () => { r.renew = shiftMonth(r.renew, 1); touch(); render(); } }) });
     }
@@ -2102,7 +2077,7 @@
     const found = {};
     if (data.ai.length && ai) for (const r of data.ai) {
       const key = normName(r.groupName);
-      if (!(key in found)) found[key] = G.find(x => normName(x.name) === key) || await createGroup(r.groupName);
+      if (!(key in found)) found[key] = r.groupName ? createGroup(ai, r.groupName) : null;
       M.rows[ai.id].push(fixRow(Object.assign({}, r, { group: found[key] ? found[key].id : '', id: null })));
     }
     for (const name in data.sheets) {
@@ -2143,19 +2118,6 @@
     const r2 = await api('POST', '/history/' + sel.value + '/restore', {}), d2 = await r2.json().catch(() => ({}));
     if (!r2.ok || !d2.ok) return alertBox(d2.error || '恢复失败');
     adopt(d2);
-  }
-  async function resyncTotp() {
-    if (S.months[latestMonth()].archived) return alertBox('最新的月份已归档，没有进行中的月份可以同步。');
-    const hidden = (S.totpSkip || []).length;
-    if (!await confirmBox('重新同步验证码账号', '把验证码账号里登记的账号全部同步到 ' + ymLabel(latestMonth()) + ' 的 AI 合租里。\n\n已经在账本里的不会重复添加。' + (hidden ? '\n之前你从账本里删掉或取消关联过的 ' + hidden + ' 个账号，也会重新加回来。' : ''), '同步')) return;
-    await refreshContext();
-    S.totpSkip = [];
-    const changed = linkTotp() | syncFromTotp();
-    view.month = latestMonth();
-    const sheet = S.sheets.find(s => s.grouped) || S.sheets.find(s => s.mode === 'members'); if (sheet) view.tab = sheet.id;
-    if (changed) touch();
-    render(); pollCodes();
-    if (!changed) alertBox('已经是同步的，没有需要添加的账号。');
   }
   async function logout() {
     await settle(); await refreshContext();
@@ -2258,14 +2220,14 @@
       prof.push(M(ym).concat(['全部合计', all, total.heads, total.income, total.cost, total.profit].map(B)));
     }
     out.push({ name: yearly ? '各类利润' : '利润汇总', head: MH.concat(['类别', '账号数', '收费人数', '收费', '续费成本', '利润']), rows: prof });
-    const gOrder = id => { const i = G.findIndex(g => g.id === id); return i < 0 ? 9999 : i; };
     for (const sh of S.sheets) {
+      const gOrder = id => { const i = sheetGroups(sh).findIndex(g => g.id === id); return i < 0 ? 9999 : i; };
       const members = sh.mode === 'members', rows = [];
       for (const ym of months) {
         let list = (S.months[ym].rows[sh.id] || []).slice();
         if (sh.grouped) list = list.map((r, i) => [r, i]).sort((a, b) => gOrder(a[0].group) - gOrder(b[0].group) || a[1] - b[1]).map(x => x[0]);
         for (const r of list) {
-          const g = G.find(x => x.id === r.group), it = issuerById(r.issuerId), c = cardById(r.cardId), inc = income(sh, r);
+          const g = sh.grouped ? groupOf(sh, r.group) : null, it = issuerById(r.issuerId), c = cardById(r.cardId), inc = income(sh, r);
           rows.push(M(ym).concat(sh.grouped ? [g ? g.name : '未分组'] : [], [r.account, D(r.renew), it ? it.name : '', it ? it.country || '' : '', c ? cardLabel(c, true) : ''],
             members ? [r.members.map(m => (m.name || '') + plain(m.amount)).join(' + '), r.members.length] : [num(r.unitPrice), num(r.count)],
             sh.mode === 'resale' ? [num(r.unitCost), inc, rowCost(sh, r), inc - rowCost(sh, r), r.note] : [inc, num(r.cost), inc - num(r.cost), r.note, r.stopped ? '已停止' : '']));
@@ -2388,7 +2350,6 @@
           { text: '导入 Excel…', run: () => isEditable() ? pickImport() : alertBox('当前月份已归档。请先切到进行中的月份，或解锁后再导入。') },
           { text: '导出 Excel…', run: exportDialog },
           { text: '导出数据备份（JSON）', run: exportBackup },
-          { text: '重新同步验证码账号', run: resyncTotp },
           { text: '从 JSON 备份恢复…', run: restoreBackup },
           { text: '恢复到某天的版本…', run: historyDialog },
           isLatest && keys.length > 1 ? { text: '删除 ' + ymLabel(view.month), danger: true, run: deleteLatestMonth } : null,

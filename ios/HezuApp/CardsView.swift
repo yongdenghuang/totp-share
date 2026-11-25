@@ -192,7 +192,7 @@ struct CardsView: View {
         var out: [(String, String, Double)] = []
         for sh in ledger.sheets {
             for r in ledger.rows(ym, sh.str("id")) where test(r) {
-                let g = sh.bool("grouped") ? (ledger.group(r.str("group"))?.name ?? "未分组") : nil
+                let g = sh.bool("grouped") ? (ledger.sheetGroup(sh, r.str("group"))?.name ?? "未分组") : nil
                 out.append((r.str("account").isEmpty ? "未填账号" : r.str("account"), sh.str("name") + (g.map { " · " + $0 } ?? ""), Calc.cost(sh.str("mode"), r)))
             }
         }

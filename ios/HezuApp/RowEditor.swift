@@ -47,7 +47,6 @@ struct RowEditor: View {
     private var linked: LTotp? { ledger.totpAccount(original.int("totpId")) }
     private var canLink: Bool { isNew && mode != "resale" }
     private var ownedGroup: String { mode == "accounts" ? sheet.str("totpGroup") : "" }
-    private var groupSync: Bool { sheet.bool("grouped") && (sheet["syncGroups"] as? Bool) != false }
 
     var body: some View {
         NavigationStack {
@@ -70,7 +69,7 @@ struct RowEditor: View {
                     if sheet.bool("grouped") {
                         Picker("分组", selection: $group) {
                             Text("未分组").tag("")
-                            ForEach(ledger.visibleGroups(in: sheet)) { g in Text(g.name).tag(g.id) }
+                            ForEach(ledger.sheetGroups(sheet)) { g in Text(g.name).tag(g.id) }
                         }
                     }
                     if let a = linked {
@@ -83,15 +82,18 @@ struct RowEditor: View {
                         TextField("账号密码（可不填，加密保存）", text: $password).font(.body.monospaced()).textInputAutocapitalization(.never).autocorrectionDisabled()
                     }
                 } footer: {
-                    if linked != nil { Text(groupSync || !sheet.bool("grouped") ? "名称和分组会和验证码账号保持一致，改了两边一起变。" : "名称和验证码账号保持一致；这张表的分组不同步，自己管。") }
-                    else if let p = picked, groupSync, let g = ledger.group(group), g.name != p.group { Text("分组同步开着：验证码账号那边的分组会跟着改成「\(g.name)」。") }
+                    if linked != nil { Text("名称和验证码账号保持一致；分组是这张表自己的，和验证码那边互不影响。") }
                 }
                 if canLink && picked == nil {
                     Section {
                         Toggle("同时添加到账号验证码", isOn: $addTotp.animation())
+                            .onChange(of: addTotp) { on in
+                                // 默认放进和这张表分组同名的验证码分组（有的话）
+                                if on && totpGroup.isEmpty, let g = ledger.sheetGroup(sheet, group), ledger.groups.contains(where: { $0.name == g.name }) { totpGroup = g.name }
+                            }
                         if addTotp {
                             TextField("TOTP 密钥", text: $secret).font(.body.monospaced()).textInputAutocapitalization(.characters).autocorrectionDisabled()
-                            if !sheet.bool("grouped") && ownedGroup.isEmpty {
+                            if ownedGroup.isEmpty {
                                 Picker("验证码分组", selection: $totpGroup) {
                                     Text("未分组").tag("")
                                     ForEach(ledger.groups) { Text($0.name).tag($0.name) }
@@ -274,16 +276,12 @@ struct RowEditor: View {
         if !canLink { finish(0); return }
         if let p = picked {
             // 选了验证码账号：关联上。分组同步开着且分组不一样时，验证码那边跟着改
-            if sheet.bool("grouped") && group.isEmpty, let g = ledger.groups.first(where: { $0.name == p.group }) { row["group"] = g.id }
-            if groupSync, let g = ledger.group(group), g.name != p.group {
-                Task { _ = try? await api.post("/admin/accounts/\(p.id)/field", ["field": "group_name", "value": g.name]); await codes.load(); await ledger.load() }
-            }
             finish(p.id); return
         }
         guard addTotp else { finish(-1); return }      // 手动填、不同步：这张表自己的账号，不自动关联
         let sec = secret.trimmingCharacters(in: .whitespaces)
         if sec.isEmpty { toast.show("同时添加到账号验证码需要填 TOTP 密钥"); return }
-        let tg = sheet.bool("grouped") ? (ledger.group(group)?.name ?? "") : (ownedGroup.isEmpty ? totpGroup : ownedGroup)
+        let tg = ownedGroup.isEmpty ? totpGroup : ownedGroup
         busy = true
         Task {
             do {
@@ -301,10 +299,8 @@ struct RowEditor: View {
     /// 关联了验证码账号的行：改了名字或分组，验证码账号那边也跟着改（存档月份不动）
     private func syncTotp(name: String) {
         guard let a = linked, !ledger.isArchived(ym) else { return }
-        let newGroup = ledger.group(group)?.name ?? ""
         Task {
             if !name.isEmpty && name != a.name { _ = try? await api.post("/admin/accounts/\(a.id)/field", ["field": "name", "value": name]) }
-            if groupSync && newGroup != a.group { _ = try? await api.post("/admin/accounts/\(a.id)/field", ["field": "group_name", "value": newGroup]) }
             await codes.load(); await ledger.load()
         }
     }
