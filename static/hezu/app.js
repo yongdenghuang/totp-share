@@ -264,10 +264,21 @@
     A.forEach(a => { const k = normName(a.name); (byName[k] = byName[k] || []).push(a); });
     for (const ym in S.months) for (const sh of S.sheets) for (const r of S.months[ym].rows[sh.id]) {
       if (r.totpId > 0 && !totpById(r.totpId)) { r.totpId = 0; n++; }
-      if (!r.totpId && r.account) { const m = byName[normName(r.account)]; if (m && m.length === 1) { r.totpId = m[0].id; n++; onLinked(r, sh, ym); } }
+      if (!r.totpId && r.account) { const m = byName[normName(r.account)]; if (m && m.length === 1 && groupFits(r, sh, m[0])) { r.totpId = m[0].id; n++; onLinked(r, sh, ym); } }
     }
     if (pullGroups()) n++;
     return n > 0;
+  }
+  // 自动关联（按名字）只在「这个账号就该在这里」时做，不然同一个邮箱在别处是另一个账号（比如用 Google 账号注册的 Claude）：
+  // - 只存账号表：验证码账号得在这张表认领的分组里
+  // - 分组表（AI 合租）：分组得对得上；归「只存账号」表的分组不算
+  // - Netflix 这类普通表：不自动关联，要关联请手动点「关联验证码」
+  function groupFits(r, sh, a) {
+    if (sh.mode === 'accounts') return !sh.totpGroup || a.group === sh.totpGroup;
+    if (!sh.grouped) return false;
+    if (sheetForGroup(a.group)) return false;
+    if (!a.group || !r.group || !G.some(g => g.id === r.group)) return true;
+    return groupIdByName(a.group) === r.group;
   }
   // ---------- 分组两边保持一致 ----------
   // 关联了验证码账号的行，分组以验证码账号为准；只动进行中的月份，存档保持当时的样子。
@@ -1229,17 +1240,34 @@
     if (preset.sheet && preset.sheet.mode === 'accounts' && !preset.group) preset.group = G.find(g => g.name === preset.sheet.totpGroup) || null;
     if (preset.sheet && !preset.sheet.grouped && preset.sheet.mode !== 'accounts') return addRowDialog(preset.sheet);
     const name = h('input', { type: 'text', placeholder: '账号邮箱或名称', autocomplete: 'off', spellcheck: false });
-    const groupSel = h('select', null, h('option', { value: '', text: '未分组' }), G.map(g => h('option', { value: g.id, text: g.name, selected: !!preset.group && g.id === preset.group.id })));
+    // 从某张表 / 某个分组里点进来的：表固定，分组默认就是那个分组
+    const fixed = !!preset.sheet && 'group' in preset;
+    const groupSel = h('select');
     const secret = h('input', { type: 'text', placeholder: '没开两步验证就留空', autocomplete: 'off', spellcheck: false });
     const password = h('input', { type: 'text', placeholder: '可不填；加密保存在验证码账号里', autocomplete: 'off', spellcheck: false });
     const toLedger = h('input', { type: 'checkbox', checked: true });
     // 只有分组表（AI 合租）的账号会关联验证码，所以只在这类表之间选
     const ledgerSheets = S.sheets.filter(s => s.grouped || s.mode === 'accounts');
     const sheetSel = h('select', null, ledgerSheets.map(s => h('option', { value: s.id, text: s.name, selected: !!preset.sheet && s.id === preset.sheet.id })));
-    const fSheet = h('label', { class: 'field', hidden: ledgerSheets.length < 2 }, '记到哪张表', sheetSel);
+    const fSheet = h('label', { class: 'field', hidden: fixed || ledgerSheets.length < 2 }, '记到哪张表', sheetSel);
     const err = h('div', { class: 'neg' });
-    toLedger.addEventListener('change', () => { fSheet.hidden = !toLedger.checked; });
-    let made = null;
+    // 分组选项跟着表走：只存账号表只能是它认领的分组；AI 合租不列被别的表认领的分组
+    let wantGroup = preset.group ? preset.group.id : groupSel.value;
+    const fillGroups = () => {
+      const sh = toLedger.checked ? S.sheets.find(x => x.id === sheetSel.value) : null;
+      let list = G, loose = true;
+      if (sh && sh.mode === 'accounts' && sh.totpGroup) { list = G.filter(g => g.name === sh.totpGroup); loose = !list.length; }
+      else if (sh && sh.grouped) list = visibleGroups();
+      const keep = wantGroup;
+      setKids(groupSel, loose ? h('option', { value: '', text: '未分组' }) : null, list.map(g => h('option', { value: g.id, text: g.name })));
+      groupSel.value = list.some(g => g.id === keep) ? keep : (loose ? '' : list[0].id);
+      groupSel.disabled = list.length === 1 && !loose;
+    };
+    groupSel.addEventListener('change', () => { wantGroup = groupSel.value; });
+    sheetSel.addEventListener('change', fillGroups);
+    toLedger.addEventListener('change', () => { fSheet.hidden = fixed || !toLedger.checked; fillGroups(); });
+    fillGroups();
+    let made = null, note = '';
     const submit = async () => {
       err.textContent = '';
       const n = name.value.trim(), sec = secret.value.trim(), pw = password.value.trim();
@@ -1261,12 +1289,14 @@
         if (!toLedger.checked) touch();
       }
       if (toLedger.checked && sheet) {
-        const dest = (g && sheetForGroup(g.name)) || sheet;   // 选的分组归「只存账号」表的，就记到那张表
-        made = fixRow({ account: n, group: dest.grouped && g ? g.id : '', totpId });
-        S.months[view.month].rows[dest.id].push(made);
-        view.tab = dest.id;
+        made = fixRow({ account: n, group: sheet.grouped && g ? g.id : '', totpId });
+        S.months[view.month].rows[sheet.id].push(made);
         view.tab = sheet.id; view.q = '';
-        if (!totpId) linkTotp();   // 没填密钥但验证码那边已有同名账号：直接关联上
+        if (!totpId) {   // 没填密钥但验证码那边已有同名账号：同一分组才关联，否则这条就是另一个账号
+          linkTotp();
+          const same = A.filter(a => normName(a.name) === normName(n));
+          if (!made.totpId && same.length) { made.totpId = -1; note = '验证码里的同名账号在「' + (same[0].group || '未分组') + '」分组，这条没有和它关联'; }
+        }
         touch();
       }
     };
@@ -1281,7 +1311,7 @@
     ], [{ text: '取消' }, { text: '添加', cls: 'primary', value: true, run: submit }]);
     if (!ok) return;
     render(); pollCodes();
-    if (made) { const inp = document.querySelectorAll('[data-row="' + made.id + '"] input')[0]; if (inp) { inp.scrollIntoView({ block: 'center' }); } }
+    if (made) { const inp = document.querySelectorAll('[data-row="' + made.id + '"] input')[0]; if (inp) { inp.scrollIntoView({ block: 'center' }); } if (note) setStatus(note); }
     else setStatus('已添加验证码账号');
   }
 

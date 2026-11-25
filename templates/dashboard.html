@@ -6,7 +6,7 @@
  <div class="d-flex gap-2">
    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnResetSort" title="取消当前排序，恢复拖拽保存的顺序">↺ 恢复默认顺序</button>
    <button type="button" class="btn btn-outline-primary btn-sm" id="btnImport" title="粘贴多行 账号----密码----密钥，一次导入">⇪ 批量导入</button>
-   <a class="btn btn-primary btn-sm" href="{{ url_for('account_new') }}">+ 添加账号</a>
+   <a class="btn btn-primary btn-sm" id="btnAdd" href="{{ url_for('account_new') }}" title="放进正在看的分组">+ 添加账号</a>
  </div>
 </div>
 
@@ -1175,8 +1175,17 @@
         setTimeout(function(){ location.reload(); }, 900);
       }).catch(function(e){ go.disabled = false; note('导入失败：' + e.message, 'error'); });
     });
+    document.getElementById('btnAdd').addEventListener('click', function(e){
+      if (activeGroup === null || activeGroup === UNGROUPED) return;
+      var q = '?group=' + encodeURIComponent(activeGroup) + (activeSub ? '&subgroup=' + encodeURIComponent(activeSub) : '');
+      e.preventDefault(); location.href = this.getAttribute('href') + q;
+    });
     document.getElementById('btnImport').addEventListener('click', function(){
-      text.value = ''; newGroup.value = ''; group.value = ''; $('importSub').value = ''; newWrap.classList.add('d-none');
+      text.value = ''; newGroup.value = ''; newWrap.classList.add('d-none');
+      // 默认放进正在看的分组 / 子分组
+      var cur = activeGroup !== null && activeGroup !== UNGROUPED ? activeGroup : '';
+      group.value = Array.prototype.some.call(group.options, function(o){ return o.value === cur; }) ? cur : '';
+      $('importSub').value = cur && activeSub ? activeSub : '';
       show([]); note(''); go.disabled = true; go.textContent = '导入';
       modal.show();
       setTimeout(function(){ text.focus(); }, 300);

@@ -47,7 +47,7 @@ struct RowEditor: View {
                     if sheet.bool("grouped") {
                         Picker("分组", selection: $group) {
                             Text("未分组").tag("")
-                            ForEach(ledger.groups) { g in Text(g.name).tag(g.id) }
+                            ForEach(ledger.visibleGroups) { g in Text(g.name).tag(g.id) }
                         }
                     }
                     if let a = linked {
@@ -213,12 +213,17 @@ struct RowEditor: View {
         if isNew {
             var row = newRow()
             for (k, v) in fields { row[k] = v }
-            // 和网页一样：账号和某个验证码账号同名（只有一个）时自动关联
+            // 和网页一样：账号和某个验证码账号同名（只有一个），而且它本来就该在这里时才自动关联。
+            // 同一个邮箱在别的分组 / 别的表里是另一个账号（比如用 Google 账号注册的 Claude），不关联、不挪分组。
             let key = normName(acct)
             let same = ledger.totp.filter { normName($0.name) == key }
-            if same.count == 1 && mode != "resale" {
-                row["totpId"] = same[0].id
-                if sheet.bool("grouped") && group.isEmpty, let g = ledger.groups.first(where: { $0.name == same[0].group }) { row["group"] = g.id }
+            if !same.isEmpty && mode != "resale" {
+                if same.count == 1 && linkFits(same[0]) {
+                    row["totpId"] = same[0].id
+                    if sheet.bool("grouped") && group.isEmpty, let g = ledger.groups.first(where: { $0.name == same[0].group }) { row["group"] = g.id }
+                } else if sheet.bool("grouped") || mode == "accounts" {
+                    row["totpId"] = -1   // 记住「不是同一个」，以后也不自动关联
+                }
             }
             let r = row
             ledger.edit { $0.addRow(ym, sid, r) }
@@ -230,6 +235,14 @@ struct RowEditor: View {
             toast.show("已保存")
         }
         dismiss()
+    }
+
+    private func linkFits(_ a: LTotp) -> Bool {
+        if mode == "accounts" { let tg = sheet.str("totpGroup"); return tg.isEmpty || a.group == tg }
+        guard sheet.bool("grouped") else { return false }      // Netflix 这类表：不自动关联
+        if ledger.sheets.contains(where: { $0.str("mode") == "accounts" && !$0.str("totpGroup").isEmpty && $0.str("totpGroup") == a.group }) { return false }
+        guard !a.group.isEmpty, !group.isEmpty, let tg = ledger.groups.first(where: { $0.name == a.group }) else { return true }
+        return tg.id == group
     }
 
     /// 关联了验证码账号的行：改了名字或分组，验证码账号那边也跟着改（存档月份不动）

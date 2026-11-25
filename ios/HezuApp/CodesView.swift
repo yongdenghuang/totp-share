@@ -106,9 +106,11 @@ final class CodesStore: ObservableObject {
         accounts.removeAll { $0.id == a.id }
     }
     /// 新建验证码账号（和网页上「添加账号」同一个接口）；同名时 duplicate = true，需要确认后带 confirm 再发一次
-    func add(name: String, secret: String, password: String, group: String, confirmDuplicate: Bool) async throws {
-        _ = try await api.post("/admin/hezu/api/accounts", ["name": name, "secret": secret, "password": password,
-                                                             "group": group, "confirmDuplicate": confirmDuplicate])
+    func add(name: String, secret: String, password: String, group: String, subgroup: String = "", confirmDuplicate: Bool) async throws {
+        let d = try await api.post("/admin/hezu/api/accounts", ["name": name, "secret": secret, "password": password,
+                                                                 "group": group, "confirmDuplicate": confirmDuplicate])
+        let sub = subgroup.trimmingCharacters(in: .whitespaces), id = d.int("id")
+        if !sub.isEmpty && id > 0 { _ = try? await api.post("/admin/accounts/\(id)/field", ["field": "subgroup", "value": sub]) }
         await load()
     }
     private func update(_ id: Int, _ f: (inout TotpAccount) -> Void) {
@@ -166,7 +168,7 @@ struct CodesView: View {
         .refreshable { await store.load() }
         .toolbar { ToolbarItem(placement: .primaryAction) { Button { adding = true } label: { Image(systemName: "plus") } } }
         .task { store.api = api; if !store.loaded { await store.load() } else { await store.refreshCodes() } }
-        .sheet(isPresented: $adding) { AddTotpSheet() }
+        .sheet(isPresented: $adding) { AddTotpSheet(presetGroup: groupFilter, presetSub: groupFilter.isEmpty ? "" : (subFilter ?? "")) }
         .sheet(item: $editing) { EditTextSheet(action: $0) }
         .sheet(item: $webPage) { p in NavigationStack { EmbeddedWeb(path: p.path).navigationTitle(p.title).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { webPage = nil; Task { await store.load() } } } } } }
@@ -439,6 +441,9 @@ struct EditTextSheet: View {
 
 // MARK: - 添加验证码账号
 struct AddTotpSheet: View {
+    /// 在某个分组 / 子分组下点「+」：默认放进正在看的地方
+    var presetGroup = ""
+    var presetSub = ""
     @EnvironmentObject var store: CodesStore
     @EnvironmentObject var toast: Toast
     @Environment(\.dismiss) private var dismiss
@@ -446,9 +451,11 @@ struct AddTotpSheet: View {
     @State private var secret = ""
     @State private var password = ""
     @State private var group = ""
+    @State private var subgroup = ""
     @State private var error: String?
     @State private var busy = false
     @State private var askDuplicate: String?
+    @State private var primed = false
 
     var body: some View {
         NavigationStack {
@@ -458,6 +465,9 @@ struct AddTotpSheet: View {
                     Picker("分组", selection: $group) {
                         Text("未分组").tag("")
                         ForEach(store.groups) { Text($0.name).tag($0.name) }
+                    }
+                    if !group.isEmpty {
+                        TextField("子分组（可不填）", text: $subgroup).autocorrectionDisabled()
                     }
                 }
                 Section {
@@ -470,6 +480,11 @@ struct AddTotpSheet: View {
                 if let error { Text(error).foregroundStyle(Color.bad) }
             }
             .navigationTitle("添加验证码账号").navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                guard !primed else { return }
+                primed = true
+                if store.groups.contains(where: { $0.name == presetGroup }) { group = presetGroup; subgroup = presetSub }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("添加") { save(false) }.disabled(busy || name.isEmpty || secret.isEmpty) }
@@ -485,7 +500,7 @@ struct AddTotpSheet: View {
         busy = true; error = nil
         Task {
             do {
-                try await store.add(name: name.trimmingCharacters(in: .whitespaces), secret: secret, password: password, group: group, confirmDuplicate: confirm)
+                try await store.add(name: name.trimmingCharacters(in: .whitespaces), secret: secret, password: password, group: group, subgroup: group.isEmpty ? "" : subgroup, confirmDuplicate: confirm)
                 toast.show("已添加"); dismiss()
             } catch let e as APIError where e.payload["duplicate"] as? Bool == true {
                 askDuplicate = e.localizedDescription + "\n确认不是重复添加的话，可以继续。"

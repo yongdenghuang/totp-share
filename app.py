@@ -585,6 +585,12 @@ def account_new():
     form_data = {"name": request.args.get("name", "").strip()[:100],
                  "secret": "", "group_name": "", "new_group": "", "subgroup": "",
                  "link_password": "", "account_password": ""}
+    # 从验证码页某个分组 / 子分组下点「添加账号」：默认放进正在看的分组
+    if request.method == "GET":
+        g = request.args.get("group", "").strip()
+        if g and g in set(list_groups()):
+            form_data["group_name"] = g
+            form_data["subgroup"] = parse_subgroup(request.args.get("subgroup", "")) or ""
     if request.method == "POST":
         form_data["name"] = request.form.get("name", "").strip()[:100]
         form_data["secret"] = request.form.get("secret", "").strip()

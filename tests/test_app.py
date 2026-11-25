@@ -130,6 +130,16 @@ def add_group(c, name):
     return post(c, "/admin/groups", data={"action": "add", "name": name})
 
 
+def test_add_form_defaults_to_the_group_being_viewed(ctx):
+    # 在验证码页某个分组下点「添加账号」：表单默认选这个分组和子分组；不存在的分组不理会
+    c = ctx.admin()
+    add_group(c, "Claude 20x")
+    html = c.get("/admin/accounts/new?group=Claude%2020x&subgroup=A%20区", base_url=BASE_URL).get_data(as_text=True)
+    assert '<option value="Claude 20x" selected' in html and 'value="A 区"' in html
+    html = c.get("/admin/accounts/new?group=nope&subgroup=A", base_url=BASE_URL).get_data(as_text=True)
+    assert "selected>nope" not in html and 'value="A"' not in html
+
+
 def test_group_management(ctx):
     c = ctx.admin()
     assert "已新建分组「plus」" in add_group(c, " plus ").get_data(as_text=True)
