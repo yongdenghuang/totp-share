@@ -218,7 +218,13 @@ struct HomeView: View {
                                 .frame(width: 92, alignment: .leading)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(d.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
-                                Text(d.meta).font(.caption).foregroundStyle(.secondary)
+                                HStack(spacing: 6) {
+                                    Text(d.meta).font(.caption.weight(.semibold)).foregroundStyle(Color(hex: d.color)).lineLimit(1).fixedSize()
+                                        .padding(.horizontal, 7).padding(.vertical, 1.5)
+                                        .background(Color(hex: d.color).opacity(0.14), in: Capsule())
+                                        .overlay(Capsule().strokeBorder(Color(hex: d.color).opacity(0.35)))
+                                    if !d.detail.isEmpty { Text(d.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                                }
                             }
                             Spacer()
                             Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)

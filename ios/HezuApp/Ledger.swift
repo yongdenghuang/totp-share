@@ -301,7 +301,15 @@ func newVps() -> JSON {
 enum LedgerRoute: Hashable { case sheet(String), cards, vps }
 
 struct SheetInfo: Identifiable { let id: String; let name: String; let mode: String; let grouped: Bool; let rows: Int }
-struct DueItem: Identifiable { let id: String; let days: Int; let title: String; let meta: String; let route: LedgerRoute }
+struct DueItem: Identifiable {
+    let id: String; let days: Int; let title: String
+    let meta: String                 // 类型：分组 / 表 / VPS（首页上做成带颜色的标签）
+    var color: String = "#64748b"
+    var detail: String = ""          // 续费卡、卡号 / VPS 标签
+    let route: LedgerRoute
+}
+/// 普通表的标签颜色（和网页 SHEET_TINTS 一样，按表的顺序取）
+let sheetTints = ["#7c3aed", "#dc2626", "#4f46e5", "#c026d3", "#0891b2", "#65a30d", "#d97706", "#e11d48", "#0f766e", "#475569"]
 
 extension LedgerStore {
     var monthTotal: Calc.Stats {
@@ -322,17 +330,21 @@ extension LedgerStore {
     var due: [DueItem] {
         var out: [DueItem] = []
         let ym = latestMonth
-        for sh in sheets {
+        for (si, sh) in sheets.enumerated() {
             let sid = sh.str("id")
             for r in rows(ym, sid) where !r.bool("stopped") {
                 guard let d = daysUntil(r.str("renew")), d <= 7 else { continue }
-                let label = sh.bool("grouped") ? (sheetGroup(sh, r.str("group"))?.name ?? sh.str("name")) : sh.str("name")
-                out.append(DueItem(id: r.str("id"), days: d, title: r.str("account").isEmpty ? "未填账号" : r.str("account"), meta: label, route: .sheet(sid)))
+                let g = sh.bool("grouped") ? sheetGroup(sh, r.str("group")) : nil
+                let label = g?.name ?? (sh.bool("grouped") ? sh.str("name") + " · 未分组" : sh.str("name"))
+                let color = g?.color ?? (sh.bool("grouped") ? "#8891a5" : sheetTints[si % sheetTints.count])
+                let detail = [issuer(r.str("issuerId"))?.str("name") ?? "", card(r.str("cardId")).map { Calc.cardLabel($0) } ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+                out.append(DueItem(id: r.str("id"), days: d, title: r.str("account").isEmpty ? "未填账号" : r.str("account"), meta: label, color: color, detail: detail, route: .sheet(sid)))
             }
         }
         for v in vps {
             guard let d = daysUntil(v.str("renew")), d <= 30 else { continue }
-            out.append(DueItem(id: v.str("id"), days: d, title: v.str("host").isEmpty ? "未命名 VPS" : v.str("host"), meta: "VPS", route: .vps))
+            let tags = (v["tags"] as? [Any] ?? []).compactMap { t -> String? in (t as? String) ?? ((t as? JSON)?.str("name")) }.filter { !$0.isEmpty }
+            out.append(DueItem(id: v.str("id"), days: d, title: v.str("host").isEmpty ? "未命名 VPS" : v.str("host"), meta: "VPS", color: "#0f766e", detail: tags.joined(separator: "、"), route: .vps))
         }
         return out.sorted { $0.days < $1.days }
     }

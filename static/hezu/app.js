@@ -1949,18 +1949,19 @@
     for (const sh of S.sheets) for (const r of S.months[view.month].rows[sh.id]) {
       const d = daysUntil(r.renew); if (r.stopped || d == null || d > 7) continue;
       const g = sh.grouped ? groupOf(sh, r.group) : null, it = issuerById(r.issuerId), c = cardById(r.cardId);
-      items.push({ d, title: r.account || '未填账号', meta: [g ? g.name : sh.name, it ? it.name : '', c ? cardLabel(c) : ''].filter(Boolean).join(' · '), cost: money(r.cost),
+      items.push({ d, title: r.account || '未填账号', kind: g ? g.name : (sh.grouped ? sh.name + ' · 未分组' : sh.name), color: rowTint(sh, r),
+        meta: [it ? it.name : '', c ? cardLabel(c) : ''].filter(Boolean).join(' · '), cost: money(r.cost),
         action: h('button', { class: 'btn small', type: 'button', text: '已续费', title: '续费日期顺延一个月', onclick: () => { r.renew = shiftMonth(r.renew, 1); touch(); render(); } }) });
     }
     for (const v of S.vps) {
       const d = daysUntil(v.renew); if (d == null || d > VPS_DUE_DAYS) continue;
-      items.push({ d, title: v.host || '未命名 VPS', meta: ['VPS', tagNames(v).join('、')].filter(Boolean).join(' · '), cost: v.price || '', action: h('button', { class: 'btn ghost small', type: 'button', text: '去修改', onclick: () => { view.tab = 'vps'; render(); } }) });
+      items.push({ d, title: v.host || '未命名 VPS', kind: 'VPS', color: '#0f766e', meta: tagNames(v).join('、'), cost: v.price || '', action: h('button', { class: 'btn ghost small', type: 'button', text: '去修改', onclick: () => { view.tab = 'vps'; render(); } }) });
     }
     items.sort((a, b) => a.d - b.d);
     return h('div', { class: 'group' },
       h('div', { class: 'group-head' }, h('span', { class: 'group-title', text: '待续费' }), h('span', { class: 'pill', text: items.length + ' 项' }), h('span', { class: 'group-sum', text: '账号 7 天内、VPS 30 天内到期' })),
       items.length ? items.map(x => h('div', { class: 'due' }, h('span', { class: 'd-rel ' + (x.d < 0 ? 'late' : 'soon'), text: relText(x.d) }),
-        h('div', { style: 'min-width:0' }, h('div', { class: 't', text: x.title }), h('div', { class: 'm', text: x.meta })), h('span', { class: 'cost num muted', text: x.cost }), x.action))
+        h('div', { style: 'min-width:0' }, h('div', { class: 't', text: x.title }), h('div', { class: 'm' }, h('span', { class: 'kind', style: '--k:' + x.color, text: x.kind }), x.meta)), h('span', { class: 'cost num muted', text: x.cost }), x.action))
         : h('div', { class: 'empty', text: '近期没有要续费的。' }));
   }
   function homeView() {
